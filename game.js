@@ -158,8 +158,8 @@ function resetGame() {
 
 // ---- Difficulty --------------------------------------------
 
-function pipeSpeed()    { return s(2.2) + Math.floor(score / 10) * s(0.25); }
-function pipeGap()      { return Math.max(s(115), s(150) - Math.floor(score / 15) * s(5)); }
+function pipeSpeed()    { return s(1.6) + Math.floor(score / 10) * s(0.15); }
+function pipeGap()      { return Math.max(s(130), s(170) - Math.floor(score / 15) * s(4)); }
 function pipeWidth()    { return s(55); }
 function spawnInterval(){ return Math.max(Math.floor(s(185) / pipeSpeed()), 55); }
 
@@ -177,7 +177,7 @@ function spawnPipe() {
 function flap() {
   ensureAudio();
   if (state === S.PLAYING) {
-    bird.vy = -s(6.5);
+    bird.vy = -s(5.8);
     playFlapSound();
   }
 }
@@ -202,7 +202,7 @@ function update() {
     const pw = pipeWidth();
 
     // Physics
-    bird.vy += s(0.28);
+    bird.vy += s(0.22);
     bird.y  += bird.vy;
 
     // Boundary – ground & ceiling
