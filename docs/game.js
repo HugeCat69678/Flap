@@ -198,7 +198,7 @@ function triggerGameOver() {
 
 // ---- Game loop timing --------------------------------------
 
-let lastFrameTime = 0;
+let lastFrameTime = performance.now();
 let accumulator   = 0;
 const FIXED_DT    = 1000 / 60; // physics tick ~16.667 ms (always 60 fps equivalent)
 
@@ -766,6 +766,7 @@ function gameOverBtnRect() {
 }
 
 function handlePointerDown(e) {
+  e.preventDefault();
   const p = canvasPos(e);
 
   if (state === S.MENU) {
