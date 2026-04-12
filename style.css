@@ -2,6 +2,7 @@
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
 }
 
 html, body {
@@ -24,6 +25,8 @@ body {
 #gameCanvas {
   display: block;
   cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
   /* On desktop show a subtle shadow; on mobile it fills the screen */
   box-shadow: 0 0 40px rgba(15, 52, 96, 0.7);
 }
