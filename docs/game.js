@@ -38,13 +38,13 @@ function resizeCanvas() {
   canvas.style.width  = W + "px";
   canvas.style.height = H + "px";
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  cachedSkyGrad  = null;
+  cachedPipeGrad = null;
 }
 
 resizeCanvas();
 window.addEventListener("resize", () => {
   resizeCanvas();
-  cachedSkyGrad  = null;
-  cachedPipeGrad = null;
   if (state === S.PLAYING) state = S.MENU;
 });
 
