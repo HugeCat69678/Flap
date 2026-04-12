@@ -32,7 +32,7 @@ function resizeCanvas() {
     H = Math.min(vh - 20, 650);
     W = Math.round(H * (DESIGN_W / DESIGN_H));
   }
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
   canvas.width  = Math.round(W * dpr);
   canvas.height = Math.round(H * dpr);
   canvas.style.width  = W + "px";
@@ -86,27 +86,51 @@ function cachePfpImg(username, pfp) {
   pfpImgCache[username] = img;
 }
 
-function registerAccount(username, password, pfp) {
+// Hash password with SHA-256 (username as salt) using SubtleCrypto
+async function hashPw(username, password) {
+  try {
+    const data = new TextEncoder().encode(username.toLowerCase() + ":" + password);
+    const buf  = await crypto.subtle.digest("SHA-256", data);
+    return Array.from(new Uint8Array(buf)).map(function(b) { return b.toString(16).padStart(2, "0"); }).join("");
+  } catch (ex) {
+    // SubtleCrypto unavailable (non-HTTPS dev env) — prefix so format is detectable
+    return "plain:" + password;
+  }
+}
+
+async function registerAccount(username, password, pfp) {
   username = username.trim();
   if (username.length < 2 || username.length > 20)
     return { ok: false, msg: "Username must be 2-20 characters" };
   if (password.length < 4)
     return { ok: false, msg: "Password must be at least 4 characters" };
-  if (accounts.find(a => a.username.toLowerCase() === username.toLowerCase()))
+  if (accounts.find(function(a) { return a.username.toLowerCase() === username.toLowerCase(); }))
     return { ok: false, msg: "Username already taken" };
-  accounts.push({ username, password, pfp: pfp || null });
+  var hashed = await hashPw(username, password);
+  accounts.push({ username: username, passwordHash: hashed, pfp: pfp || null });
   persistAccounts();
-  currentUser = { username, pfp: pfp || null };
+  currentUser = { username: username, pfp: pfp || null };
   persistSession(currentUser);
   cachePfpImg(username, pfp);
   return { ok: true };
 }
 
-function loginAccount(username, password) {
+async function loginAccount(username, password) {
   username = username.trim();
-  const acct = accounts.find(
-    a => a.username.toLowerCase() === username.toLowerCase() && a.password === password
-  );
+  var hashed = await hashPw(username, password);
+  var acct = accounts.find(function(a) {
+    if (a.username.toLowerCase() !== username.toLowerCase()) return false;
+    // Support both hashed (new) and legacy plain-text passwords migrated on first login
+    if (a.passwordHash) return a.passwordHash === hashed;
+    if (a.password === password) {
+      // Migrate to hashed on first successful login
+      a.passwordHash = hashed;
+      delete a.password;
+      persistAccounts();
+      return true;
+    }
+    return false;
+  });
   if (!acct) return { ok: false, msg: "Invalid username or password" };
   currentUser = { username: acct.username, pfp: acct.pfp || null };
   persistSession(currentUser);
@@ -1247,6 +1271,8 @@ function peerIdFromCode(code) {
   return "flapgame-" + code.toUpperCase().replace(/-/g, "");
 }
 
+var _mpHostRetries = 0;
+
 function startHostMP() {
   if (!window.Peer) { mpError = "Multiplayer unavailable"; return; }
   mpRole     = "host";
@@ -1257,14 +1283,16 @@ function startHostMP() {
   try { mpPeer = new window.Peer(peerIdFromCode(mpCode)); }
   catch (ex) { mpError = "Could not start peer"; mpSubState = "menu"; return; }
 
-  mpPeer.on("open", function() { mpSubState = "waiting"; });
+  mpPeer.on("open", function() { _mpHostRetries = 0; mpSubState = "waiting"; });
 
   mpPeer.on("error", function(err) {
-    if (err.type === "unavailable-id") {
+    if (err.type === "unavailable-id" && _mpHostRetries < 5) {
+      _mpHostRetries++;
       mpPeer.destroy(); mpPeer = null;
       mpCode = generateCode();
       startHostMP();
     } else {
+      _mpHostRetries = 0;
       mpError = "Error: " + err.type; mpSubState = "menu";
     }
   });
@@ -1317,8 +1345,11 @@ function setupMPConn() {
 }
 
 function handleMPData(data) {
+  if (!data || typeof data.type !== "string") return;
+
   if (data.type === "hello") {
-    otherUsername = data.username || "Guest";
+    var uname = (typeof data.username === "string") ? data.username.slice(0, 20).trim() : "";
+    otherUsername = uname || "Guest";
 
   } else if (data.type === "start" && mpRole === "guest") {
     mpActive   = true;
@@ -1327,21 +1358,30 @@ function handleMPData(data) {
     state = S.PLAYING;
 
   } else if (data.type === "sync" && mpRole === "guest") {
+    if (!Array.isArray(data.pipes) || !data.bird) return;
     var hp = data.pipes;
     var scoredMap = {};
-    for (var i = 0; i < pipes.length; i++) scoredMap[Math.round(pipes[i].top)] = pipes[i].scored;
+    for (var i = 0; i < pipes.length; i++) {
+      var key = Math.round(pipes[i].top) + "_" + Math.round(pipes[i].bottom);
+      scoredMap[key] = pipes[i].scored;
+    }
     pipes = hp.map(function(h) {
-      return { x: h.x, top: h.top, bottom: h.bottom,
-               scored: !!scoredMap[Math.round(h.top)], scoredOther: false };
-    });
-    if (otherBird) { otherBird.y = data.bird.y; otherBird.vy = data.bird.vy; }
-    if (data.score !== undefined) otherScore = data.score;
+      if (typeof h.x !== "number" || typeof h.top !== "number" || typeof h.bottom !== "number") return null;
+      var k = Math.round(h.top) + "_" + Math.round(h.bottom);
+      return { x: h.x, top: h.top, bottom: h.bottom, scored: !!scoredMap[k], scoredOther: false };
+    }).filter(Boolean);
+    if (typeof data.bird.y === "number") {
+      if (otherBird) { otherBird.y = data.bird.y; otherBird.vy = data.bird.vy || 0; }
+    }
+    if (typeof data.score === "number") otherScore = data.score;
 
   } else if (data.type === "bird" && mpRole === "host") {
-    if (otherBird) { otherBird.y = data.y; otherBird.vy = data.vy; }
+    if (otherBird && typeof data.y === "number") { otherBird.y = data.y; otherBird.vy = data.vy || 0; }
 
   } else if (data.type === "pipe" && mpRole === "guest") {
-    spawnPipe(data.top);
+    if (typeof data.top === "number" && data.top >= 0 && data.top <= H) {
+      spawnPipe(data.top);
+    }
 
   } else if (data.type === "dead") {
     otherScore    = data.score || 0;
@@ -1429,7 +1469,8 @@ var _selectedAvId = PREMADE_AVATARS[0].id;
 var _customPfpUrl = null;
 
 function escHtml(str) {
-  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 function renderAuthCard(card, view) {
@@ -1491,9 +1532,13 @@ function renderLoginView(card) {
     var u = card.querySelector("#lgUser").value;
     var p = card.querySelector("#lgPass").value;
     var errEl = card.querySelector("#lgErr");
-    var res = loginAccount(u, p);
-    if (!res.ok) { errEl.textContent = res.msg; errEl.classList.remove("hidden"); }
-    else         { hideAuthOverlay(); }
+    var btn = card.querySelector("#lgSubmit");
+    btn.disabled = true;
+    loginAccount(u, p).then(function(res) {
+      btn.disabled = false;
+      if (!res.ok) { errEl.textContent = res.msg; errEl.classList.remove("hidden"); }
+      else         { hideAuthOverlay(); }
+    });
   }
   card.querySelector("#lgSubmit").onclick = doLogin;
   card.querySelector("#lgPass").addEventListener("keydown", function(e) { if (e.key === "Enter") doLogin(); });
@@ -1556,12 +1601,16 @@ function renderRegisterView(card) {
     var u = card.querySelector("#rgUser").value;
     var p = card.querySelector("#rgPass").value;
     var errEl = card.querySelector("#rgErr");
+    var btn = card.querySelector("#rgSubmit");
+    btn.disabled = true;
     var pfp = _customPfpUrl
       ? { type: "custom",  dataUrl: _customPfpUrl }
       : { type: "premade", avatarId: _selectedAvId };
-    var res = registerAccount(u, p, pfp);
-    if (!res.ok) { errEl.textContent = res.msg; errEl.classList.remove("hidden"); }
-    else         { hideAuthOverlay(); }
+    registerAccount(u, p, pfp).then(function(res) {
+      btn.disabled = false;
+      if (!res.ok) { errEl.textContent = res.msg; errEl.classList.remove("hidden"); }
+      else         { hideAuthOverlay(); }
+    });
   }
   card.querySelector("#rgSubmit").onclick = doRegister;
   card.querySelector("#rgPass").addEventListener("keydown", function(e) { if (e.key === "Enter") doRegister(); });
