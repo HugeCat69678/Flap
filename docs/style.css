@@ -28,6 +28,7 @@ body {
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
   box-shadow: 0 0 40px rgba(15, 52, 96, 0.7);
+  will-change: transform;
 }
 
 /* ── Overlays ─────────────────────────────────────────────── */

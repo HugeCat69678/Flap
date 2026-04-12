@@ -32,12 +32,14 @@ function resizeCanvas() {
     H = Math.min(vh - 20, 650);
     W = Math.round(H * (DESIGN_W / DESIGN_H));
   }
-  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
   canvas.width  = Math.round(W * dpr);
   canvas.height = Math.round(H * dpr);
   canvas.style.width  = W + "px";
   canvas.style.height = H + "px";
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  cachedSkyGrad  = null;
+  cachedPipeGrad = null;
 }
 
 resizeCanvas();
@@ -216,6 +218,8 @@ let score       = 0;
 let coinsEarned = 0;
 let groundX     = 0;
 let clouds      = [];
+let cachedSkyGrad  = null;   // invalidated on resize
+let cachedPipeGrad = null;   // invalidated on resize
 
 // Multiplayer
 let mpActive      = false;
@@ -580,11 +584,13 @@ function drawBirdLabel(x, y, w, label, color) {
 // ---- Draw background & pipes --------------------------------
 
 function drawBackground() {
-  const sky = ctx.createLinearGradient(0, 0, 0, H);
-  sky.addColorStop(0,    "#5fc8ea");
-  sky.addColorStop(0.75, "#b8e4f0");
-  sky.addColorStop(1,    "#87ceeb");
-  ctx.fillStyle = sky;
+  if (!cachedSkyGrad) {
+    cachedSkyGrad = ctx.createLinearGradient(0, 0, 0, H);
+    cachedSkyGrad.addColorStop(0,    "#5fc8ea");
+    cachedSkyGrad.addColorStop(0.75, "#b8e4f0");
+    cachedSkyGrad.addColorStop(1,    "#87ceeb");
+  }
+  ctx.fillStyle = cachedSkyGrad;
   ctx.fillRect(0, 0, W, H);
 
   ctx.fillStyle = "rgba(255,255,255,0.82)";
@@ -611,25 +617,31 @@ function drawCloud(cx, cy, r) {
 
 function drawPipes() {
   const pw = pipeWidth();
+  if (!cachedPipeGrad) {
+    cachedPipeGrad = ctx.createLinearGradient(0, 0, pw, 0);
+    cachedPipeGrad.addColorStop(0,   "#4caf50");
+    cachedPipeGrad.addColorStop(0.5, "#66bb6a");
+    cachedPipeGrad.addColorStop(1,   "#388e3c");
+  }
   for (const p of pipes) {
-    const grad = ctx.createLinearGradient(p.x, 0, p.x + pw, 0);
-    grad.addColorStop(0,   "#4caf50");
-    grad.addColorStop(0.5, "#66bb6a");
-    grad.addColorStop(1,   "#388e3c");
+    ctx.save();
+    ctx.translate(p.x, 0);
 
-    ctx.fillStyle = grad;
-    ctx.fillRect(p.x, 0, pw, p.top);
+    ctx.fillStyle = cachedPipeGrad;
+    ctx.fillRect(0, 0, pw, p.top);
     ctx.fillStyle = "#2e7d32";
-    ctx.fillRect(p.x - s(3), p.top - s(18), pw + s(6), s(18));
+    ctx.fillRect(-s(3), p.top - s(18), pw + s(6), s(18));
 
-    ctx.fillStyle = grad;
-    ctx.fillRect(p.x, p.bottom, pw, H - p.bottom);
+    ctx.fillStyle = cachedPipeGrad;
+    ctx.fillRect(0, p.bottom, pw, H - p.bottom);
     ctx.fillStyle = "#2e7d32";
-    ctx.fillRect(p.x - s(3), p.bottom, pw + s(6), s(18));
+    ctx.fillRect(-s(3), p.bottom, pw + s(6), s(18));
 
     ctx.fillStyle = "rgba(255,255,255,0.18)";
-    ctx.fillRect(p.x + s(5), 0, s(5), p.top);
-    ctx.fillRect(p.x + s(5), p.bottom + s(18), s(5), H - p.bottom - s(18));
+    ctx.fillRect(s(5), 0, s(5), p.top);
+    ctx.fillRect(s(5), p.bottom + s(18), s(5), H - p.bottom - s(18));
+
+    ctx.restore();
   }
 }
 
@@ -1124,7 +1136,7 @@ function handlePointerDown(e) {
   const p = canvasPos(e);
 
   if (state === S.MENU) {
-    if (hitCircle(p.x, p.y, profileCX(), profileCY(), profileR())) {
+    if (hitCircle(p.x, p.y, profileCX(), profileCY(), Math.max(profileR(), s(26)))) {
       showAuthOverlay(); return;
     }
     const bW = W * 0.62, bH = s(50);
