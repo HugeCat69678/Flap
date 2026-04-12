@@ -17,6 +17,8 @@ const DESIGN_W = 360;
 const DESIGN_H = 640;
 let W = DESIGN_W, H = DESIGN_H;
 
+const MENU_BOB_PERIOD = 420; // ms period of the bird bob animation on the menu screen
+
 function s(n) { return n * (W / DESIGN_W); }
 
 function resizeCanvas() {
@@ -194,9 +196,15 @@ function triggerGameOver() {
   writeSave();
 }
 
-// ---- Update ------------------------------------------------
+// ---- Game loop timing --------------------------------------
 
-function update() {
+let lastFrameTime = 0;
+let accumulator   = 0;
+const FIXED_DT    = 1000 / 60; // physics tick ~16.667 ms (always 60 fps equivalent)
+
+// ---- Physics step ------------------------------------------
+
+function step() {
   if (state === S.PLAYING) {
     const sp = pipeSpeed();
     const pw = pipeWidth();
@@ -246,7 +254,18 @@ function update() {
       }
     }
   }
+}
 
+// ---- Main loop ---------------------------------------------
+
+function update(ts = 0) {
+  const elapsed = Math.min(ts - lastFrameTime, 100); // clamp to avoid spiral-of-death
+  lastFrameTime = ts;
+  accumulator  += elapsed;
+  while (accumulator >= FIXED_DT) {
+    step();
+    accumulator -= FIXED_DT;
+  }
   draw();
   requestAnimationFrame(update);
 }
@@ -271,26 +290,37 @@ function roundRect(x, y, w, h, r) {
 function drawButton(x, y, w, h, label, primary = true) {
   const r = h / 3;
   ctx.save();
-  ctx.shadowColor    = "rgba(0,0,0,0.45)";
-  ctx.shadowBlur     = s(6);
+  ctx.shadowColor    = "rgba(0,0,0,0.5)";
+  ctx.shadowBlur     = s(8);
   ctx.shadowOffsetY  = s(3);
   roundRect(x, y, w, h, r);
   const g = ctx.createLinearGradient(x, y, x, y + h);
   if (primary) {
-    g.addColorStop(0, "#ff9f43");
+    g.addColorStop(0, "#ffb347");
     g.addColorStop(1, "#c0392b");
   } else {
-    g.addColorStop(0, "#636e72");
+    g.addColorStop(0, "#7f8c8d");
     g.addColorStop(1, "#2d3436");
   }
   ctx.fillStyle = g;
   ctx.fill();
-  ctx.shadowColor   = "transparent";
+  // Gloss shine on top half
+  ctx.shadowColor = "transparent";
+  ctx.save();
+  roundRect(x, y, w, h, r);
+  ctx.clip();
+  roundRect(x + 1, y + 1, w - 2, h * 0.45, r);
+  ctx.fillStyle = "rgba(255,255,255,0.20)";
+  ctx.fill();
+  ctx.restore();
   ctx.fillStyle     = "#fff";
   ctx.font          = `bold ${Math.round(h * 0.38)}px Arial, sans-serif`;
   ctx.textAlign     = "center";
   ctx.textBaseline  = "middle";
-  ctx.fillText(label, x + w / 2, y + h / 2);
+  ctx.shadowColor   = "rgba(0,0,0,0.45)";
+  ctx.shadowBlur    = s(2);
+  ctx.shadowOffsetY = s(1);
+  ctx.fillText(label, x + w / 2, y + h / 2 + s(1));
   ctx.restore();
 }
 
@@ -393,6 +423,11 @@ function drawPipes() {
     ctx.fillRect(p.x, p.bottom, pw, H - p.bottom);
     ctx.fillStyle = "#2e7d32";
     ctx.fillRect(p.x - s(3), p.bottom, pw + s(6), s(18));
+
+    // Highlight stripe
+    ctx.fillStyle = "rgba(255,255,255,0.18)";
+    ctx.fillRect(p.x + s(5), 0, s(5), p.top);
+    ctx.fillRect(p.x + s(5), p.bottom + s(18), s(5), H - p.bottom - s(18));
   }
 }
 
@@ -416,15 +451,23 @@ function drawCoinIcon(x, y, r) {
 }
 
 function drawHUD() {
-  // Score centre-top
   ctx.save();
-  ctx.textAlign    = "center";
+
+  // Score pill backdrop
+  ctx.textAlign = "center";
+  ctx.font      = `bold ${s(38)}px Arial, sans-serif`;
+  const scoreStr = String(score);
+  const scoreW   = Math.max(s(62), ctx.measureText(scoreStr).width + s(26));
+  ctx.fillStyle  = "rgba(0,0,0,0.32)";
+  roundRect(W / 2 - scoreW / 2, s(10), scoreW, s(44), s(14));
+  ctx.fill();
+
+  // Score number
   ctx.textBaseline = "alphabetic";
-  ctx.font         = `bold ${s(38)}px Arial, sans-serif`;
-  ctx.fillStyle    = "rgba(255,255,255,0.92)";
+  ctx.fillStyle    = "rgba(255,255,255,0.96)";
   ctx.shadowColor  = "rgba(0,0,0,0.55)";
   ctx.shadowBlur   = s(4);
-  ctx.fillText(score, W / 2, s(52));
+  ctx.fillText(scoreStr, W / 2, s(49));
 
   // Coin counter top-left
   drawCoinIcon(s(10), s(10), s(11));
@@ -443,21 +486,31 @@ function drawMenu() {
 
   // Title card
   ctx.save();
-  ctx.shadowColor   = "rgba(0,0,0,0.45)";
-  ctx.shadowBlur    = s(12);
-  ctx.fillStyle     = "rgba(5,5,30,0.62)";
+  ctx.shadowColor   = "rgba(0,0,0,0.55)";
+  ctx.shadowBlur    = s(16);
+  const cardGrad = ctx.createLinearGradient(W * 0.1, H * 0.07, W * 0.1, H * 0.07 + H * 0.34);
+  cardGrad.addColorStop(0, "rgba(20,20,60,0.80)");
+  cardGrad.addColorStop(1, "rgba(5,5,25,0.80)");
+  ctx.fillStyle = cardGrad;
   roundRect(W * 0.1, H * 0.07, W * 0.8, H * 0.34, s(16));
   ctx.fill();
+  ctx.shadowColor = "transparent";
+  ctx.strokeStyle = "rgba(255,215,0,0.22)";
+  ctx.lineWidth   = s(1.5);
+  ctx.stroke();
   ctx.restore();
 
   ctx.save();
   ctx.textAlign = "center";
 
   // Title
-  ctx.font      = `bold ${s(54)}px Arial, sans-serif`;
-  ctx.fillStyle = "#ffd700";
+  ctx.font        = `bold ${s(54)}px Arial, sans-serif`;
+  ctx.fillStyle   = "#ffd700";
   ctx.shadowColor = "#ff6600";
-  ctx.shadowBlur  = s(14);
+  ctx.shadowBlur  = s(18);
+  ctx.strokeStyle = "rgba(200,100,0,0.5)";
+  ctx.lineWidth   = s(1.5);
+  ctx.strokeText("FLAP!", W / 2, H * 0.18);
   ctx.fillText("FLAP!", W / 2, H * 0.18);
 
   // Tagline
@@ -473,10 +526,11 @@ function drawMenu() {
 
   ctx.restore();
 
-  // Bird preview
+  // Bird preview – animated bob
   const skin = getSkin(save.currentSkin);
   const bw = s(52), bh = s(37);
-  drawBirdAt(W / 2 - bw / 2, H * 0.35, bw, bh, 0, skin);
+  const bob = Math.sin(Date.now() / MENU_BOB_PERIOD) * s(7);
+  drawBirdAt(W / 2 - bw / 2, H * 0.35 + bob, bw, bh, bob * 0.35, skin);
 
   // Coin display
   drawCoinIcon(W * 0.5 - s(44), H * 0.46, s(11));
@@ -607,41 +661,58 @@ function drawShop() {
 
 function drawGameOver() {
   ctx.save();
-  ctx.fillStyle = "rgba(0,0,0,0.58)";
+  ctx.fillStyle = "rgba(0,0,0,0.62)";
   ctx.fillRect(0, 0, W, H);
 
   const pW = W * 0.8, pH = H * 0.44;
   const pX = (W - pW) / 2, pY = (H - pH) / 2 - s(20);
 
-  ctx.fillStyle = "rgba(8,8,36,0.92)";
-  roundRect(pX, pY, pW, pH, s(16));
+  // Panel with gradient
+  const panelGrad = ctx.createLinearGradient(pX, pY, pX, pY + pH);
+  panelGrad.addColorStop(0, "rgba(18,18,50,0.96)");
+  panelGrad.addColorStop(1, "rgba(6,6,28,0.96)");
+  ctx.fillStyle = panelGrad;
+  ctx.shadowColor = "rgba(0,0,0,0.7)";
+  ctx.shadowBlur  = s(20);
+  roundRect(pX, pY, pW, pH, s(18));
   ctx.fill();
+  ctx.shadowColor = "transparent";
+  ctx.strokeStyle = "rgba(239,83,80,0.35)";
+  ctx.lineWidth   = s(1.5);
+  ctx.stroke();
 
   ctx.textAlign    = "center";
   ctx.textBaseline = "alphabetic";
 
-  ctx.font      = `bold ${s(32)}px Arial, sans-serif`;
-  ctx.fillStyle = "#ef5350";
-  ctx.fillText("GAME OVER", W / 2, pY + s(42));
+  ctx.font        = `bold ${s(32)}px Arial, sans-serif`;
+  ctx.fillStyle   = "#ef5350";
+  ctx.shadowColor = "rgba(239,83,80,0.4)";
+  ctx.shadowBlur  = s(8);
+  ctx.fillText("GAME OVER", W / 2, pY + s(46));
+  ctx.shadowBlur  = 0;
 
-  ctx.font      = `${s(20)}px Arial, sans-serif`;
+  // Divider
+  ctx.fillStyle = "rgba(255,255,255,0.1)";
+  ctx.fillRect(pX + pW * 0.1, pY + s(54), pW * 0.8, s(1));
+
+  ctx.font      = `bold ${s(22)}px Arial, sans-serif`;
   ctx.fillStyle = "#fff";
-  ctx.fillText(`Score: ${score}`, W / 2, pY + s(74));
+  ctx.fillText(`Score: ${score}`, W / 2, pY + s(80));
 
   ctx.font      = `${s(14)}px Arial, sans-serif`;
   ctx.fillStyle = "#aaa";
-  ctx.fillText(`Best: ${save.highScore}`, W / 2, pY + s(96));
+  ctx.fillText(`Best: ${save.highScore}`, W / 2, pY + s(100));
 
   if (coinsEarned > 0) {
     ctx.font      = `bold ${s(16)}px Arial, sans-serif`;
     ctx.fillStyle = "#ffd700";
-    ctx.fillText(`+${coinsEarned} 🪙 coins earned!`, W / 2, pY + s(122));
+    ctx.fillText(`+${coinsEarned} 🪙 coins earned!`, W / 2, pY + s(124));
   }
 
   ctx.restore();
 
   const btnW = W * 0.55, btnH = s(48);
-  const btnX = (W - btnW) / 2, btnY = pY + pH - s(58);
+  const btnX = (W - btnW) / 2, btnY = pY + pH - s(60);
   drawButton(btnX, btnY, btnW, btnH, "▶  PLAY AGAIN");
 
   // Menu link
