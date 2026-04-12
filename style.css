@@ -4,18 +4,26 @@
   box-sizing: border-box;
 }
 
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 body {
-  background: #1a1a2e;
+  background: #0d0d1a;
   display: flex;
   justify-content: center;
   align-items: center;
-  min-height: 100vh;
-  overflow: hidden;
+  min-height: 100dvh;
 }
 
 #gameCanvas {
   display: block;
-  border: 3px solid #0f3460;
-  box-shadow: 0 0 30px rgba(15, 52, 96, 0.8);
-  border-radius: 4px;
+  cursor: pointer;
+  /* On desktop show a subtle shadow; on mobile it fills the screen */
+  box-shadow: 0 0 40px rgba(15, 52, 96, 0.7);
 }
