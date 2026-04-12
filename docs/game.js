@@ -20,6 +20,9 @@ const MENU_BOB_PERIOD = 420;
 
 function s(n) { return n * (W / DESIGN_W); }
 
+let cachedSkyGrad  = null;   // invalidated on resize
+let cachedPipeGrad = null;   // invalidated on resize
+
 // ---- Canvas resize with devicePixelRatio -------------------
 
 function resizeCanvas() {
@@ -218,8 +221,7 @@ let score       = 0;
 let coinsEarned = 0;
 let groundX     = 0;
 let clouds      = [];
-let cachedSkyGrad  = null;   // invalidated on resize
-let cachedPipeGrad = null;   // invalidated on resize
+
 
 // Multiplayer
 let mpActive      = false;
