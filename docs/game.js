@@ -38,8 +38,9 @@ function resizeCanvas() {
   canvas.style.width  = W + "px";
   canvas.style.height = H + "px";
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  cachedSkyGrad  = null;
-  cachedPipeGrad = null;
+  cachedSkyGrad      = null;
+  cachedPipeGrad     = null;
+  cachedMenuCardGrad = null;
 }
 
 resizeCanvas();
@@ -218,8 +219,9 @@ let score       = 0;
 let coinsEarned = 0;
 let groundX     = 0;
 let clouds      = [];
-let cachedSkyGrad  = null;   // invalidated on resize
-let cachedPipeGrad = null;   // invalidated on resize
+let cachedSkyGrad      = null;   // invalidated on resize
+let cachedPipeGrad     = null;   // invalidated on resize
+let cachedMenuCardGrad = null;   // invalidated on resize
 
 // Multiplayer
 let mpActive      = false;
@@ -708,10 +710,12 @@ function drawMenu() {
   ctx.save();
   ctx.shadowColor = "rgba(0,0,0,0.55)";
   ctx.shadowBlur  = s(16);
-  const cardGrad = ctx.createLinearGradient(W * 0.1, H * 0.07, W * 0.1, H * 0.07 + H * 0.28);
-  cardGrad.addColorStop(0, "rgba(20,20,60,0.82)");
-  cardGrad.addColorStop(1, "rgba(5,5,25,0.82)");
-  ctx.fillStyle = cardGrad;
+  if (!cachedMenuCardGrad) {
+    cachedMenuCardGrad = ctx.createLinearGradient(W * 0.1, H * 0.07, W * 0.1, H * 0.07 + H * 0.28);
+    cachedMenuCardGrad.addColorStop(0, "rgba(20,20,60,0.82)");
+    cachedMenuCardGrad.addColorStop(1, "rgba(5,5,25,0.82)");
+  }
+  ctx.fillStyle = cachedMenuCardGrad;
   roundRect(W * 0.1, H * 0.07, W * 0.8, H * 0.28, s(16));
   ctx.fill();
   ctx.shadowColor = "transparent";
@@ -784,56 +788,59 @@ const CARD_GAP    = function() { return s(10); };
 const SHOP_HEADER = function() { return s(58); };
 
 function maxShopScroll() {
-  return Math.max(0, SKINS.length * (CARD_H() + CARD_GAP()) + SHOP_HEADER() + s(10) - H);
+  const ch = CARD_H(), cg = CARD_GAP(), sh = SHOP_HEADER();
+  return Math.max(0, SKINS.length * (ch + cg) + sh + s(10) - H);
 }
 
 function drawShop() {
+  const ch = CARD_H(), cg = CARD_GAP(), sh = SHOP_HEADER();
+
   ctx.fillStyle = "#12122a";
   ctx.fillRect(0, 0, W, H);
 
   ctx.save();
   ctx.beginPath();
-  ctx.rect(0, SHOP_HEADER(), W, H - SHOP_HEADER());
+  ctx.rect(0, sh, W, H - sh);
   ctx.clip();
 
   const cw     = W * 0.88;
   const cx     = (W - cw) / 2;
-  const startY = SHOP_HEADER() + s(8) - shopScroll;
+  const startY = sh + s(8) - shopScroll;
 
   for (let i = 0; i < SKINS.length; i++) {
     const skin     = SKINS[i];
-    const cy       = startY + i * (CARD_H() + CARD_GAP());
+    const cy       = startY + i * (ch + cg);
     const unlocked = save.unlockedSkins.includes(skin.id);
     const selected = save.currentSkin === skin.id;
 
     ctx.fillStyle = selected ? "rgba(255,200,0,0.15)" : "rgba(255,255,255,0.06)";
-    roundRect(cx, cy, cw, CARD_H(), s(10));
+    roundRect(cx, cy, cw, ch, s(10));
     ctx.fill();
     if (selected) { ctx.strokeStyle = "#ffd700"; ctx.lineWidth = s(2); ctx.stroke(); }
 
     const bw = s(38), bh = s(27);
-    drawBirdAt(cx + s(12), cy + (CARD_H() - bh) / 2, bw, bh, 0, skin);
+    drawBirdAt(cx + s(12), cy + (ch - bh) / 2, bw, bh, 0, skin);
 
     ctx.fillStyle    = "#fff";
     ctx.font         = "bold " + s(15) + "px Arial, sans-serif";
     ctx.textAlign    = "left";
     ctx.textBaseline = "alphabetic";
-    ctx.fillText(skin.name, cx + s(60), cy + CARD_H() * 0.42);
+    ctx.fillText(skin.name, cx + s(60), cy + ch * 0.42);
 
     if (unlocked) {
       ctx.font      = s(12) + "px Arial, sans-serif";
       ctx.fillStyle = selected ? "#ffd700" : "#aaa";
-      ctx.fillText(selected ? "Equipped" : "Tap to equip", cx + s(60), cy + CARD_H() * 0.68);
+      ctx.fillText(selected ? "Equipped" : "Tap to equip", cx + s(60), cy + ch * 0.68);
     } else {
       ctx.font      = s(12) + "px Arial, sans-serif";
       ctx.fillStyle = save.coins >= skin.cost ? "#66bb6a" : "#ef5350";
-      ctx.fillText(skin.cost + " coins", cx + s(60), cy + CARD_H() * 0.68);
+      ctx.fillText(skin.cost + " coins", cx + s(60), cy + ch * 0.68);
     }
 
     if (!selected) {
       const btnW = s(68), btnH = s(30);
       const btnX = cx + cw - btnW - s(10);
-      const btnY = cy + (CARD_H() - btnH) / 2;
+      const btnY = cy + (ch - btnH) / 2;
       const canBuy = !unlocked && save.coins >= skin.cost;
       drawButton(btnX, btnY, btnW, btnH, unlocked ? "WEAR" : "BUY", canBuy || unlocked);
     }
@@ -841,16 +848,16 @@ function drawShop() {
   ctx.restore();
 
   ctx.fillStyle = "#0a0a22";
-  ctx.fillRect(0, 0, W, SHOP_HEADER());
+  ctx.fillRect(0, 0, W, sh);
   ctx.fillStyle = "#1a1a40";
-  ctx.fillRect(0, SHOP_HEADER() - s(2), W, s(2));
+  ctx.fillRect(0, sh - s(2), W, s(2));
 
   ctx.save();
   ctx.textAlign    = "center";
   ctx.textBaseline = "middle";
   ctx.font         = "bold " + s(22) + "px Arial, sans-serif";
   ctx.fillStyle    = "#ffd700";
-  ctx.fillText("SKIN SHOP", W / 2, SHOP_HEADER() / 2);
+  ctx.fillText("SKIN SHOP", W / 2, sh / 2);
 
   drawCoinIcon(s(10), s(10), s(11));
   ctx.font      = "bold " + s(14) + "px Arial, sans-serif";
@@ -861,7 +868,7 @@ function drawShop() {
   ctx.textAlign = "right";
   ctx.font      = "bold " + s(15) + "px Arial, sans-serif";
   ctx.fillStyle = "#aaa";
-  ctx.fillText("< BACK", W - s(12), SHOP_HEADER() / 2);
+  ctx.fillText("< BACK", W - s(12), sh / 2);
   ctx.restore();
 }
 
@@ -1077,15 +1084,17 @@ function draw() {
   drawBackground();
   drawPipes();
 
+  const mySkin = getSkin(save.currentSkin);
+
   if (mpActive && otherBird) {
-    const altSkin = getSkin(save.currentSkin === "blue" ? "classic" : "blue");
+    const altSkin = getSkin(mySkin.id === "blue" ? "classic" : "blue");
     drawBirdAt(otherBird.x, otherBird.y, otherBird.w, otherBird.h, otherBird.vy,
                altSkin, otherBirdDead ? 0.35 : 1);
     drawBirdLabel(otherBird.x, otherBird.y, otherBird.w, otherUsername, "#90caf9");
   }
 
   drawBirdAt(bird.x, bird.y, bird.w, bird.h, bird.vy,
-             getSkin(save.currentSkin), myBirdDead ? 0.35 : 1);
+             mySkin, myBirdDead ? 0.35 : 1);
   if (mpActive) {
     drawBirdLabel(bird.x, bird.y, bird.w,
                   currentUser ? currentUser.username : "Guest", "#fff");
@@ -1209,20 +1218,21 @@ function handlePointerUp(e) {
 }
 
 function handleShopTap(px, py) {
+  const ch = CARD_H(), cg = CARD_GAP(), sh = SHOP_HEADER();
   const cw     = W * 0.88;
   const cx     = (W - cw) / 2;
-  const startY = SHOP_HEADER() + s(8) - shopScroll;
+  const startY = sh + s(8) - shopScroll;
 
   for (let i = 0; i < SKINS.length; i++) {
     const skin = SKINS[i];
-    const cy   = startY + i * (CARD_H() + CARD_GAP());
-    if (!hit(px, py, cx, cy, cw, CARD_H())) continue;
+    const cy   = startY + i * (ch + cg);
+    if (!hit(px, py, cx, cy, cw, ch)) continue;
 
     const unlocked = save.unlockedSkins.includes(skin.id);
     const selected = save.currentSkin === skin.id;
     const btnW = s(68), btnH = s(30);
     const btnX = cx + cw - btnW - s(10);
-    const btnY = cy + (CARD_H() - btnH) / 2;
+    const btnY = cy + (ch - btnH) / 2;
 
     if (hit(px, py, btnX, btnY, btnW, btnH)) {
       if (!unlocked && save.coins >= skin.cost) {
