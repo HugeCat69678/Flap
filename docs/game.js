@@ -370,6 +370,7 @@ let otherScore    = 0;
 let otherBirdDead = false;
 let myBirdDead    = false;
 let mpQrImage     = null;   // cached QR code HTMLImageElement
+const MAX_AVATAR_BYTES = 50000;  // max data-URL length for custom avatars over peer
 
 function initClouds() {
   clouds = [];
@@ -1658,10 +1659,10 @@ function generateQrImage(code) {
   mpQrImage = null;
   if (typeof qrcode === "undefined") return;
   try {
-    var qr = qrcode(0, "M");
+    const qr = qrcode(0, "M");
     qr.addData(code);
     qr.make();
-    var img = new Image();
+    const img = new Image();
     img.src = qr.createDataURL(4, 0);
     img.onload = function() { mpQrImage = img; };
   } catch (ex) { /* QR lib unavailable */ }
@@ -1672,7 +1673,7 @@ function getMyPfpPayload() {
   if (currentUser.pfp.type === "premade") return { type: "premade", avatarId: currentUser.pfp.avatarId };
   if (currentUser.pfp.type === "custom" && currentUser.pfp.dataUrl) {
     var url = currentUser.pfp.dataUrl;
-    if (url.length > 50000) return null;  // skip huge images
+    if (url.length > MAX_AVATAR_BYTES) return null;  // skip huge images
     return { type: "custom", dataUrl: url };
   }
   return null;
@@ -1771,7 +1772,7 @@ function handleMPData(data) {
     if (data.pfp && typeof data.pfp === "object") {
       if (data.pfp.type === "premade" && typeof data.pfp.avatarId === "string") {
         otherPfp = { type: "premade", avatarId: data.pfp.avatarId };
-      } else if (data.pfp.type === "custom" && typeof data.pfp.dataUrl === "string" && data.pfp.dataUrl.length <= 50000) {
+      } else if (data.pfp.type === "custom" && typeof data.pfp.dataUrl === "string" && data.pfp.dataUrl.length <= MAX_AVATAR_BYTES) {
         otherPfp = { type: "custom", dataUrl: data.pfp.dataUrl };
         cachePfpImg("__peer__", otherPfp);
       } else {
