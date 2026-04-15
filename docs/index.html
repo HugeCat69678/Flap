@@ -8,6 +8,28 @@
 </head>
 <body>
   <canvas id="gameCanvas"></canvas>
+
+  <!-- Auth overlay: login / register / profile -->
+  <div id="authOverlay" class="overlay hidden">
+    <div class="modal-card" id="authCard"></div>
+  </div>
+
+  <!-- Code-entry overlay: join a multiplayer room -->
+  <div id="codeOverlay" class="overlay hidden">
+    <div class="modal-card">
+      <h2>Join Room</h2>
+      <p class="modal-sub">Enter the code your friend shared</p>
+      <input id="codeInput" type="text" maxlength="7"
+             placeholder="ABC-123" autocomplete="off" spellcheck="false" />
+      <div id="codeError" class="error-msg hidden"></div>
+      <div class="modal-buttons">
+        <button id="codeJoinBtn"   class="btn-primary">Connect</button>
+        <button id="codeCancelBtn" class="btn-secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script src="game.js"></script>
 </body>
 </html>
