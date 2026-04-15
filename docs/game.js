@@ -26,20 +26,21 @@ let cachedSkyGrad  = null;   // invalidated on resize
 let cachedPipeGrad = null;   // invalidated on resize
 
 function resizeCanvas() {
+  // Fixed logical dimensions — zoom and resize never change game logic
+  W = DESIGN_W;
+  H = DESIGN_H;
+
   const vw = window.innerWidth;
   const vh = window.innerHeight;
-  if (vw <= 540) {
-    W = vw;
-    H = vh;
-  } else {
-    H = Math.min(vh - 20, 650);
-    W = Math.round(H * (DESIGN_W / DESIGN_H));
-  }
+  const scale = Math.min(vw / W, (vh - 10) / H);
+  const cssW  = Math.round(W * scale);
+  const cssH  = Math.round(H * scale);
+
   const dpr = Math.min(window.devicePixelRatio || 1, 3);
   canvas.width  = Math.round(W * dpr);
   canvas.height = Math.round(H * dpr);
-  canvas.style.width  = W + "px";
-  canvas.style.height = H + "px";
+  canvas.style.width  = cssW + "px";
+  canvas.style.height = cssH + "px";
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
@@ -48,10 +49,7 @@ function resizeCanvas() {
 }
 
 resizeCanvas();
-window.addEventListener("resize", () => {
-  resizeCanvas();
-  if (state === S.PLAYING) state = S.MENU;
-});
+window.addEventListener("resize", resizeCanvas);
 
 // ---- Accounts ----------------------------------------------
 
@@ -225,6 +223,12 @@ let groundX     = 0;
 let clouds      = [];
 let hills       = [];    // parallax background hills
 
+// ---- Secret code & zen mode --------------------------------
+
+const SECRET_CODE = ["ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
+let secretCodeProgress = 0;
+let zenMode = false;
+
 // ---- Visual effects ----------------------------------------
 
 let particles    = [];   // score sparkle particles
@@ -379,9 +383,9 @@ function initClouds() {
 }
 
 function resetGame() {
-  bird = { x: s(80), y: H / 2, w: s(34), h: s(24), vy: 0 };
+  bird = { x: s(80), y: H / 2, w: s(30), h: s(28), vy: 0 };
   if (mpActive) {
-    otherBird     = { x: s(80), y: H / 2, w: s(34), h: s(24), vy: 0 };
+    otherBird     = { x: s(80), y: H / 2, w: s(30), h: s(28), vy: 0 };
     otherBirdDead = false;
     myBirdDead    = false;
   }
@@ -489,6 +493,22 @@ function step() {
   }
   for (const p of pipes) p.x -= sp;
   pipes = pipes.filter(p => p.x + pw > 0);
+
+  // Zen mode: pipes smoothly move their gap to align with the bird
+  if (zenMode && !myBirdDead) {
+    const gap = pipeGap();
+    for (const p of pipes) {
+      const distX = p.x - bird.x;
+      if (distX > -pw && distX < s(250)) {
+        const targetCenter = Math.max(gap / 2 + s(20),
+          Math.min(H - s(90) - gap / 2, bird.y));
+        const currentCenter = (p.top + p.bottom) / 2;
+        const newCenter = currentCenter + (targetCenter - currentCenter) * 0.045;
+        p.top    = newCenter - gap / 2;
+        p.bottom = newCenter + gap / 2;
+      }
+    }
+  }
 
   // Score + collision for my bird
   if (!myBirdDead) {
@@ -681,38 +701,41 @@ function drawBirdAt(x, y, w, h, vy, skin, alpha) {
   const wingFlap = Math.sin(wingAngle) * h * 0.18;
   ctx.fillStyle = skin.wingColor;
   ctx.beginPath();
-  ctx.ellipse(-w * 0.1, h * 0.22 + wingFlap, w * 0.33, h * 0.22, 0.3, 0, Math.PI * 2);
+  ctx.ellipse(-w * 0.08, h * 0.15 + wingFlap, w * 0.3, h * 0.25, 0.3, 0, Math.PI * 2);
   ctx.fill();
 
-  // Body with subtle highlight
+  // Round body (ellipse)
   ctx.fillStyle = skin.bodyColor;
-  roundRect(-w / 2, -h / 2, w, h, h * 0.32);
+  ctx.beginPath();
+  ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
   ctx.fill();
 
   // Body highlight for 3D effect
   ctx.save();
-  ctx.clip();
-  ctx.fillStyle = "rgba(255,255,255,0.15)";
   ctx.beginPath();
-  ctx.ellipse(-w * 0.05, -h * 0.25, w * 0.5, h * 0.3, -0.2, 0, Math.PI * 2);
+  ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.fillStyle = "rgba(255,255,255,0.18)";
+  ctx.beginPath();
+  ctx.ellipse(-w * 0.08, -h * 0.22, w * 0.45, h * 0.35, -0.2, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 
   ctx.fillStyle = skin.eyeColor;
   ctx.beginPath();
-  ctx.arc(w * 0.12, -h * 0.18, h * 0.22, 0, Math.PI * 2);
+  ctx.arc(w * 0.14, -h * 0.14, h * 0.22, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.fillStyle = skin.pupilColor;
   ctx.beginPath();
-  ctx.arc(w * 0.17, -h * 0.18, h * 0.1, 0, Math.PI * 2);
+  ctx.arc(w * 0.2, -h * 0.14, h * 0.1, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.fillStyle = skin.beakColor;
   ctx.beginPath();
-  ctx.moveTo(w / 2,             -h * 0.05);
-  ctx.lineTo(w / 2 + w * 0.28, -h * 0.22);
-  ctx.lineTo(w / 2 + w * 0.28,  h * 0.1);
+  ctx.moveTo(w / 2,              -h * 0.03);
+  ctx.lineTo(w / 2 + w * 0.24,  -h * 0.2);
+  ctx.lineTo(w / 2 + w * 0.24,   h * 0.12);
   ctx.closePath();
   ctx.fill();
 
@@ -889,6 +912,16 @@ function drawHUD() {
   ctx.fillText(save.coins, s(36), s(26));
   ctx.restore();
 
+  if (zenMode) {
+    ctx.save();
+    ctx.font         = "bold " + s(12) + "px Arial, sans-serif";
+    ctx.textAlign    = "center";
+    ctx.textBaseline = "top";
+    ctx.fillStyle    = "rgba(100,255,100,0.6)";
+    ctx.fillText("ZEN MODE", W / 2, s(58));
+    ctx.restore();
+  }
+
   if (mpActive) {
     ctx.save();
     ctx.font         = "bold " + s(12) + "px Arial, sans-serif";
@@ -945,7 +978,7 @@ function drawMenu() {
   ctx.restore();
 
   const skin = getSkin(save.currentSkin);
-  const bw = s(52), bh = s(37);
+  const bw = s(46), bh = s(42);
   const bob = Math.sin(Date.now() / MENU_BOB_PERIOD) * s(7);
   wingAngle = Date.now() / 80; // keep wings animated on menu
   drawBirdAt(W / 2 - bw / 2, H * 0.32 + bob, bw, bh, bob * 0.35, skin);
@@ -956,6 +989,15 @@ function drawMenu() {
   ctx.textBaseline = "middle";
   ctx.fillStyle    = "#ffd700";
   ctx.fillText(save.coins + " coins", W * 0.5 - s(20), H * 0.42 + s(11));
+
+  if (zenMode) {
+    ctx.save();
+    ctx.font      = "bold " + s(13) + "px Arial, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "rgba(100,255,100,0.65)";
+    ctx.fillText("\u{1F54A}\uFE0F Zen Mode Active", W / 2, H * 0.475);
+    ctx.restore();
+  }
 
   const bW = W * 0.62, bH = s(50);
   const bX = (W - bW) / 2;
@@ -1014,7 +1056,7 @@ function drawShop() {
     ctx.fill();
     if (selected) { ctx.strokeStyle = "#ffd700"; ctx.lineWidth = s(2); ctx.stroke(); }
 
-    const bw = s(38), bh = s(27);
+    const bw = s(34), bh = s(30);
     drawBirdAt(cx + s(12), cy + (CARD_H() - bh) / 2, bw, bh, 0, skin);
 
     ctx.fillStyle    = "#fff";
@@ -1102,7 +1144,7 @@ function drawMultiplayer() {
 
     const sk1 = getSkin(save.currentSkin);
     const sk2 = getSkin(save.currentSkin === "blue" ? "classic" : "blue");
-    const bw = s(44), bh = s(32);
+    const bw = s(40), bh = s(36);
     const bob = Math.sin(Date.now() / 350) * s(5);
     drawBirdAt(W / 2 - bw - s(12), H * 0.38 + bob, bw, bh, 0, sk1);
     drawBirdAt(W / 2 + s(12),       H * 0.38 - bob, bw, bh, 0, sk2);
@@ -1350,7 +1392,7 @@ function handlePointerDown(e) {
     const bW = W * 0.62, bH = s(50);
     const bX = (W - bW) / 2;
     if (hit(p.x, p.y, bX, H * 0.50, bW, bH)) {
-      ensureAudio(); mpActive = false; state = S.PLAYING; resetGame(); return;
+      ensureAudio(); mpActive = false; otherBird = null; zenMode = false; state = S.PLAYING; resetGame(); return;
     }
     if (hit(p.x, p.y, bX, H * 0.50 + bH + s(12), bW, bH)) {
       shopScroll = 0; state = S.SHOP; return;
@@ -1461,7 +1503,7 @@ document.addEventListener("keydown", function(e) {
   if (e.code === "Space" || e.key === " ") {
     e.preventDefault();
     if (state === S.PLAYING)   { flap(); return; }
-    if (state === S.MENU)      { ensureAudio(); mpActive = false; state = S.PLAYING; resetGame(); return; }
+    if (state === S.MENU)      { ensureAudio(); mpActive = false; otherBird = null; zenMode = false; state = S.PLAYING; resetGame(); return; }
     if (state === S.GAME_OVER) {
       if (mpActive && mpConn) mpConn.send({ type: "restart" });
       restartFromGameOver(); return;
@@ -1472,6 +1514,26 @@ document.addEventListener("keydown", function(e) {
     if (state === S.MULTIPLAYER) { cleanupMP(); state = S.MENU; return; }
     if (state === S.PLAYING)     { triggerGameOver(); return; }
     if (state === S.GAME_OVER)   { if (mpActive) cleanupMP(); state = S.MENU; return; }
+  }
+
+  // Secret code: Left Right Left Right Up Down → activate zen mode
+  if (state === S.MENU && e.key.startsWith("Arrow")) {
+    if (e.key === SECRET_CODE[secretCodeProgress]) {
+      secretCodeProgress++;
+      if (secretCodeProgress === SECRET_CODE.length) {
+        secretCodeProgress = 0;
+        zenMode = true;
+        ensureAudio();
+        playBeep({ freq: 1200, duration: 0.15, type: "sine", gain: 0.25 });
+        mpActive = false;
+        otherBird = null;
+        state = S.PLAYING;
+        resetGame();
+        return;
+      }
+    } else {
+      secretCodeProgress = (e.key === SECRET_CODE[0]) ? 1 : 0;
+    }
   }
 });
 
