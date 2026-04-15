@@ -10,7 +10,7 @@
 // ============================================================
 
 const canvas = document.getElementById("gameCanvas");
-const ctx    = canvas.getContext("2d");
+const ctx    = canvas.getContext("2d", { alpha: false });
 
 const DESIGN_W = 360;
 const DESIGN_H = 640;
@@ -35,12 +35,14 @@ function resizeCanvas() {
     H = Math.min(vh - 20, 650);
     W = Math.round(H * (DESIGN_W / DESIGN_H));
   }
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
   canvas.width  = Math.round(W * dpr);
   canvas.height = Math.round(H * dpr);
   canvas.style.width  = W + "px";
   canvas.style.height = H + "px";
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
   cachedSkyGrad  = null;
   cachedPipeGrad = null;
 }
@@ -221,6 +223,133 @@ let score       = 0;
 let coinsEarned = 0;
 let groundX     = 0;
 let clouds      = [];
+let hills       = [];    // parallax background hills
+
+// ---- Visual effects ----------------------------------------
+
+let particles    = [];   // score sparkle particles
+let scorePopups  = [];   // "+1" floating text
+let deathFlash   = 0;    // screen flash alpha (0–1)
+let wingAngle    = 0;    // wing flap animation phase
+
+function spawnScoreParticles(cx, cy) {
+  for (let i = 0; i < 8; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = s(1.2 + Math.random() * 2);
+    particles.push({
+      x: cx, y: cy,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - s(1),
+      life: 1,
+      decay: 0.018 + Math.random() * 0.012,
+      size: s(2 + Math.random() * 3),
+      color: Math.random() > 0.5 ? "#ffd700" : "#fff",
+    });
+  }
+}
+
+function spawnScorePopup(cx, cy, text) {
+  scorePopups.push({ x: cx, y: cy, text: text, life: 1, decay: 0.016 });
+}
+
+function updateParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x    += p.vx;
+    p.y    += p.vy;
+    p.vy   += s(0.06);
+    p.life -= p.decay;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+function updateScorePopups() {
+  for (let i = scorePopups.length - 1; i >= 0; i--) {
+    const p = scorePopups[i];
+    p.y    -= s(0.8);
+    p.life -= p.decay;
+    if (p.life <= 0) scorePopups.splice(i, 1);
+  }
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    ctx.save();
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle   = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+function drawScorePopups() {
+  for (const p of scorePopups) {
+    ctx.save();
+    ctx.globalAlpha   = p.life;
+    ctx.font          = "bold " + s(18) + "px Arial, sans-serif";
+    ctx.textAlign     = "center";
+    ctx.textBaseline  = "middle";
+    ctx.fillStyle     = "#ffd700";
+    ctx.shadowColor   = "rgba(0,0,0,0.5)";
+    ctx.shadowBlur    = s(3);
+    ctx.fillText(p.text, p.x, p.y);
+    ctx.restore();
+  }
+}
+
+function drawDeathFlash() {
+  if (deathFlash > 0) {
+    ctx.save();
+    ctx.globalAlpha = deathFlash;
+    ctx.fillStyle   = "#fff";
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+    deathFlash = Math.max(0, deathFlash - 0.04);
+  }
+}
+
+function initHills() {
+  hills = [];
+  // Two layers of hills for parallax
+  for (let layer = 0; layer < 2; layer++) {
+    const segments = 6 + layer * 2;
+    const points   = [];
+    for (let i = 0; i <= segments; i++) {
+      points.push({
+        x: (W / segments) * i,
+        y: H - s(70) - s(30 + layer * 25) + Math.random() * s(20 + layer * 10),
+      });
+    }
+    hills.push({
+      points: points,
+      color:  layer === 0 ? "rgba(60,140,80,0.35)" : "rgba(40,110,60,0.22)",
+      speed:  s(0.15 + layer * 0.1),
+      offset: 0,
+    });
+  }
+}
+
+function drawHills() {
+  const groundY = H - s(70);
+  for (const hill of hills) {
+    ctx.save();
+    ctx.fillStyle = hill.color;
+    ctx.beginPath();
+    ctx.moveTo(-s(20), groundY);
+    for (let i = 0; i < hill.points.length; i++) {
+      const p    = hill.points[i];
+      const next = hill.points[Math.min(i + 1, hill.points.length - 1)];
+      const cx   = (p.x + next.x) / 2 + hill.offset;
+      ctx.quadraticCurveTo(p.x + hill.offset, p.y, cx, (p.y + next.y) / 2);
+    }
+    ctx.lineTo(W + s(20), groundY);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+}
 
 // Multiplayer
 let mpActive      = false;
@@ -246,6 +375,7 @@ function initClouds() {
       speed: s(0.3 + Math.random() * 0.3),
     });
   }
+  initHills();
 }
 
 function resetGame() {
@@ -261,6 +391,9 @@ function resetGame() {
   otherScore  = 0;
   coinsEarned = 0;
   groundX     = 0;
+  particles   = [];
+  scorePopups = [];
+  deathFlash  = 0;
   initClouds();
 }
 
@@ -299,6 +432,7 @@ function triggerGameOver() {
   if (!mpActive) {
     if (state === S.GAME_OVER) return;
     state = S.GAME_OVER;
+    deathFlash = 0.7;
     playHitSound();
     coinsEarned = Math.floor(score / 2) + (score >= 5 ? 5 : 0);
     save.coins += coinsEarned;
@@ -308,6 +442,7 @@ function triggerGameOver() {
   }
   if (myBirdDead) return;
   myBirdDead = true;
+  deathFlash = 0.7;
   playHitSound();
   if (mpConn) mpConn.send({ type: "dead", score });
   if (otherBirdDead) endMpGame();
@@ -362,6 +497,10 @@ function step() {
         p.scored = true;
         score++;
         playBeep({ freq: 900, duration: 0.05, gain: 0.15 });
+        // Visual effects on score
+        const midY = (p.top + p.bottom) / 2;
+        spawnScoreParticles(bird.x + bird.w, midY);
+        spawnScorePopup(bird.x + bird.w / 2, bird.y - s(10), "+1");
       }
     }
     for (const p of pipes) {
@@ -380,8 +519,11 @@ function step() {
     }
   }
 
-  // Ground scroll + clouds
+  // Ground scroll + clouds + visual effects
   groundX = (groundX - sp) % s(24);
+  wingAngle += 0.18;
+  updateParticles();
+  updateScorePopups();
   for (const c of clouds) {
     c.x -= c.speed;
     if (c.x + c.r * 3 < 0) {
@@ -535,14 +677,26 @@ function drawBirdAt(x, y, w, h, vy, skin, alpha) {
   ctx.translate(x + w / 2, y + h / 2);
   ctx.rotate(Math.min(Math.max(vy / 9, -0.5), 0.75));
 
+  // Animated wing with flapping motion
+  const wingFlap = Math.sin(wingAngle) * h * 0.18;
   ctx.fillStyle = skin.wingColor;
   ctx.beginPath();
-  ctx.ellipse(-w * 0.1, h * 0.22, w * 0.33, h * 0.22, 0.3, 0, Math.PI * 2);
+  ctx.ellipse(-w * 0.1, h * 0.22 + wingFlap, w * 0.33, h * 0.22, 0.3, 0, Math.PI * 2);
   ctx.fill();
 
+  // Body with subtle highlight
   ctx.fillStyle = skin.bodyColor;
   roundRect(-w / 2, -h / 2, w, h, h * 0.32);
   ctx.fill();
+
+  // Body highlight for 3D effect
+  ctx.save();
+  ctx.clip();
+  ctx.fillStyle = "rgba(255,255,255,0.15)";
+  ctx.beginPath();
+  ctx.ellipse(-w * 0.05, -h * 0.25, w * 0.5, h * 0.3, -0.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 
   ctx.fillStyle = skin.eyeColor;
   ctx.beginPath();
@@ -587,21 +741,43 @@ function drawBirdLabel(x, y, w, label, color) {
 function drawBackground() {
   if (!cachedSkyGrad) {
     cachedSkyGrad = ctx.createLinearGradient(0, 0, 0, H);
-    cachedSkyGrad.addColorStop(0,    "#5fc8ea");
+    cachedSkyGrad.addColorStop(0,    "#4ab8e0");
+    cachedSkyGrad.addColorStop(0.5,  "#87ceeb");
     cachedSkyGrad.addColorStop(0.75, "#b8e4f0");
-    cachedSkyGrad.addColorStop(1,    "#87ceeb");
+    cachedSkyGrad.addColorStop(1,    "#d4eef7");
   }
   ctx.fillStyle = cachedSkyGrad;
   ctx.fillRect(0, 0, W, H);
 
+  // Clouds with soft shadow
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,0.06)";
+  ctx.shadowBlur  = s(8);
+  ctx.shadowOffsetY = s(4);
   ctx.fillStyle = "rgba(255,255,255,0.82)";
   for (const c of clouds) drawCloud(c.x, c.y, c.r);
+  ctx.restore();
+
+  // Parallax hills behind the ground
+  drawHills();
 
   const groundY = H - s(70);
-  ctx.fillStyle = "#ded895";
+
+  // Ground with richer gradient
+  const groundGrad = ctx.createLinearGradient(0, groundY, 0, H);
+  groundGrad.addColorStop(0,   "#c9b458");
+  groundGrad.addColorStop(0.5, "#ded895");
+  groundGrad.addColorStop(1,   "#b8a940");
+  ctx.fillStyle = groundGrad;
   ctx.fillRect(0, groundY, W, s(70));
-  ctx.fillStyle = "#73bf2e";
+
+  // Grass stripe with gradient
+  const grassGrad = ctx.createLinearGradient(0, groundY, 0, groundY + s(8));
+  grassGrad.addColorStop(0, "#8fd64a");
+  grassGrad.addColorStop(1, "#5da020");
+  ctx.fillStyle = grassGrad;
   ctx.fillRect(0, groundY, W, s(8));
+
   ctx.fillStyle = "rgba(0,0,0,0.06)";
   const sw = s(24);
   for (let x = groundX; x < W + sw; x += sw * 2)
@@ -620,27 +796,52 @@ function drawPipes() {
   const pw = pipeWidth();
   if (!cachedPipeGrad) {
     cachedPipeGrad = ctx.createLinearGradient(0, 0, pw, 0);
-    cachedPipeGrad.addColorStop(0,   "#4caf50");
-    cachedPipeGrad.addColorStop(0.5, "#66bb6a");
-    cachedPipeGrad.addColorStop(1,   "#388e3c");
+    cachedPipeGrad.addColorStop(0,    "#3e9c44");
+    cachedPipeGrad.addColorStop(0.15, "#5cb860");
+    cachedPipeGrad.addColorStop(0.5,  "#66bb6a");
+    cachedPipeGrad.addColorStop(0.85, "#4caf50");
+    cachedPipeGrad.addColorStop(1,    "#357a38");
   }
   for (const p of pipes) {
     ctx.save();
     ctx.translate(p.x, 0);
 
+    // Pipe shadow
+    ctx.fillStyle = "rgba(0,0,0,0.12)";
+    ctx.fillRect(s(3), 0, pw, p.top);
+    ctx.fillRect(s(3), p.bottom, pw, H - p.bottom);
+
+    // Top pipe body
     ctx.fillStyle = cachedPipeGrad;
     ctx.fillRect(0, 0, pw, p.top);
-    ctx.fillStyle = "#2e7d32";
+
+    // Top pipe lip with gradient
+    const lipGrad = ctx.createLinearGradient(0, p.top - s(18), 0, p.top);
+    lipGrad.addColorStop(0, "#2e7d32");
+    lipGrad.addColorStop(1, "#1b5e20");
+    ctx.fillStyle = lipGrad;
     ctx.fillRect(-s(3), p.top - s(18), pw + s(6), s(18));
 
+    // Bottom pipe body
     ctx.fillStyle = cachedPipeGrad;
     ctx.fillRect(0, p.bottom, pw, H - p.bottom);
-    ctx.fillStyle = "#2e7d32";
+
+    // Bottom pipe lip with gradient
+    const lipGrad2 = ctx.createLinearGradient(0, p.bottom, 0, p.bottom + s(18));
+    lipGrad2.addColorStop(0, "#1b5e20");
+    lipGrad2.addColorStop(1, "#2e7d32");
+    ctx.fillStyle = lipGrad2;
     ctx.fillRect(-s(3), p.bottom, pw + s(6), s(18));
 
-    ctx.fillStyle = "rgba(255,255,255,0.18)";
-    ctx.fillRect(s(5), 0, s(5), p.top);
-    ctx.fillRect(s(5), p.bottom + s(18), s(5), H - p.bottom - s(18));
+    // Highlight stripe
+    ctx.fillStyle = "rgba(255,255,255,0.2)";
+    ctx.fillRect(s(5), 0, s(4), p.top);
+    ctx.fillRect(s(5), p.bottom + s(18), s(4), H - p.bottom - s(18));
+
+    // Dark edge stripe
+    ctx.fillStyle = "rgba(0,0,0,0.1)";
+    ctx.fillRect(pw - s(4), 0, s(4), p.top);
+    ctx.fillRect(pw - s(4), p.bottom + s(18), s(4), H - p.bottom - s(18));
 
     ctx.restore();
   }
@@ -746,6 +947,7 @@ function drawMenu() {
   const skin = getSkin(save.currentSkin);
   const bw = s(52), bh = s(37);
   const bob = Math.sin(Date.now() / MENU_BOB_PERIOD) * s(7);
+  wingAngle = Date.now() / 80; // keep wings animated on menu
   drawBirdAt(W / 2 - bw / 2, H * 0.32 + bob, bw, bh, bob * 0.35, skin);
 
   drawCoinIcon(W * 0.5 - s(44), H * 0.42, s(11));
@@ -1092,7 +1294,12 @@ function draw() {
                   currentUser ? currentUser.username : "Guest", "#fff");
   }
 
+  // Visual effects layers
+  drawParticles();
+  drawScorePopups();
+
   drawHUD();
+  drawDeathFlash();
   if (state === S.GAME_OVER) drawGameOver();
 }
 
