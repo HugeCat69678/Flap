@@ -365,9 +365,11 @@ let mpSubState    = "menu"; // 'menu'|'creating'|'waiting'|'joining'|'connected'
 let mpError       = "";
 let otherBird     = null;
 let otherUsername = "Guest";
+let otherPfp      = null;   // avatar info received from peer
 let otherScore    = 0;
 let otherBirdDead = false;
 let myBirdDead    = false;
+let mpQrImage     = null;   // cached QR code HTMLImageElement
 
 function initClouds() {
   clouds = [];
@@ -710,15 +712,19 @@ function drawBirdAt(x, y, w, h, vy, skin, alpha) {
   ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // Body highlight for 3D effect
+  // Body highlight for 3D effect (radial gradient — no hard circle edge)
   ctx.save();
   ctx.beginPath();
   ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
   ctx.clip();
-  ctx.fillStyle = "rgba(255,255,255,0.18)";
-  ctx.beginPath();
-  ctx.ellipse(-w * 0.08, -h * 0.22, w * 0.45, h * 0.35, -0.2, 0, Math.PI * 2);
-  ctx.fill();
+  const hlX = -w * 0.08, hlY = -h * 0.22;
+  const hlR = Math.max(w, h) * 0.45;
+  const hlGrad = ctx.createRadialGradient(hlX, hlY, 0, hlX, hlY, hlR);
+  hlGrad.addColorStop(0,   "rgba(255,255,255,0.22)");
+  hlGrad.addColorStop(0.6, "rgba(255,255,255,0.08)");
+  hlGrad.addColorStop(1,   "rgba(255,255,255,0)");
+  ctx.fillStyle = hlGrad;
+  ctx.fillRect(-w, -h, w * 2, h * 2);
   ctx.restore();
 
   ctx.fillStyle = skin.eyeColor;
@@ -742,20 +748,38 @@ function drawBirdAt(x, y, w, h, vy, skin, alpha) {
   ctx.restore();
 }
 
-function drawBirdLabel(x, y, w, label, color) {
+function drawBirdLabel(x, y, w, label, color, pfp, pfpKey) {
   ctx.save();
   ctx.font         = "bold " + s(11) + "px Arial, sans-serif";
   ctx.textAlign    = "center";
   ctx.textBaseline = "alphabetic";
+  const hasAvatar = !!pfp;
+  const avSize    = hasAvatar ? s(14) : 0;
+  const avGap     = hasAvatar ? s(4) : 0;
   const tw = ctx.measureText(label).width;
+  const totalW = tw + avSize + avGap;
   const px = s(6), py = s(4);
+  const bgX = x + w / 2 - totalW / 2 - px;
+  const bgY = y - s(24);
+  const bgW = totalW + px * 2;
+  const bgH = s(16) + py;
   ctx.fillStyle = "rgba(0,0,0,0.55)";
-  roundRect(x + w / 2 - tw / 2 - px, y - s(22), tw + px * 2, s(14) + py, s(4));
+  roundRect(bgX, bgY, bgW, bgH, s(4));
   ctx.fill();
+
+  // Avatar icon
+  if (hasAvatar) {
+    const avR = avSize / 2;
+    const avCX = bgX + px + avR;
+    const avCY = bgY + bgH / 2;
+    drawAvatarCircle(avCX, avCY, avR, pfp, pfpKey || label);
+  }
+
   ctx.fillStyle   = color || "#fff";
   ctx.shadowColor = "rgba(0,0,0,0.8)";
   ctx.shadowBlur  = s(3);
-  ctx.fillText(label, x + w / 2, y - s(11));
+  const textX = hasAvatar ? (x + w / 2 + (avSize + avGap) / 2) : (x + w / 2);
+  ctx.fillText(label, textX, bgY + bgH / 2 + s(4));
   ctx.restore();
 }
 
@@ -924,11 +948,16 @@ function drawHUD() {
 
   if (mpActive) {
     ctx.save();
+    const opAvatarR = s(9);
+    if (otherPfp) {
+      drawAvatarCircle(W - s(6) - opAvatarR, s(44) + opAvatarR, opAvatarR, otherPfp, "__peer__");
+    }
     ctx.font         = "bold " + s(12) + "px Arial, sans-serif";
     ctx.textAlign    = "right";
     ctx.textBaseline = "top";
     ctx.fillStyle    = "rgba(255,255,255,0.7)";
-    ctx.fillText(otherUsername + ": " + otherScore, W - s(6), s(44));
+    const opScoreText = otherUsername + ": " + otherScore;
+    ctx.fillText(opScoreText, W - s(6) - (otherPfp ? opAvatarR * 2 + s(4) : 0), s(44));
     ctx.restore();
   }
 
@@ -1168,25 +1197,41 @@ function drawMultiplayer() {
     ctx.textAlign    = "center";
     ctx.textBaseline = "middle";
 
-    ctx.font      = "bold " + s(15) + "px Arial, sans-serif";
+    ctx.font      = "bold " + s(14) + "px Arial, sans-serif";
     ctx.fillStyle = "rgba(255,255,255,0.6)";
-    ctx.fillText("Share this code with your friend:", W / 2, H * 0.26);
+    ctx.fillText("Share this code or scan the QR:", W / 2, H * 0.14);
 
     ctx.shadowColor = "rgba(255,215,0,0.55)";
     ctx.shadowBlur  = s(22);
-    ctx.font        = "bold " + s(44) + "px Courier New, monospace";
+    ctx.font        = "bold " + s(40) + "px Courier New, monospace";
     ctx.fillStyle   = "#ffd700";
-    ctx.fillText(mpCode, W / 2, H * 0.40);
+    ctx.fillText(mpCode, W / 2, H * 0.22);
     ctx.shadowBlur  = 0;
+
+    // QR code
+    if (mpQrImage && mpQrImage.complete && mpQrImage.naturalWidth) {
+      const qrSize = s(130);
+      const qrX = (W - qrSize) / 2;
+      const qrY = H * 0.28;
+      // White background for QR
+      ctx.fillStyle = "#fff";
+      roundRect(qrX - s(8), qrY - s(8), qrSize + s(16), qrSize + s(16), s(10));
+      ctx.fill();
+      ctx.drawImage(mpQrImage, qrX, qrY, qrSize, qrSize);
+    } else {
+      ctx.font      = s(12) + "px Arial, sans-serif";
+      ctx.fillStyle = "rgba(255,255,255,0.3)";
+      ctx.fillText("QR code loading...", W / 2, H * 0.45);
+    }
 
     const dots = ".".repeat(Math.floor(Date.now() / 500) % 4);
     ctx.font      = s(13) + "px Arial, sans-serif";
     ctx.fillStyle = "rgba(255,255,255,0.42)";
-    ctx.fillText("Waiting for friend to join" + dots, W / 2, H * 0.50);
+    ctx.fillText("Waiting for friend to join" + dots, W / 2, H * 0.72);
     ctx.restore();
 
     const cbW = W * 0.5, cbH = s(44);
-    drawButton((W - cbW) / 2, H * 0.62, cbW, cbH, "Cancel", false);
+    drawButton((W - cbW) / 2, H * 0.78, cbW, cbH, "Cancel", false);
 
   } else if (mpSubState === "joining") {
     ctx.save();
@@ -1203,27 +1248,85 @@ function drawMultiplayer() {
     ctx.restore();
 
   } else if (mpSubState === "connected") {
+    // ---- Lobby: show both players with avatars ----
     ctx.save();
     ctx.textAlign    = "center";
     ctx.textBaseline = "middle";
     ctx.font         = "bold " + s(18) + "px Arial, sans-serif";
     ctx.fillStyle    = "#66bb6a";
-    ctx.fillText("Connected!", W / 2, H * 0.30);
-    ctx.font      = s(14) + "px Arial, sans-serif";
-    ctx.fillStyle = "rgba(255,255,255,0.6)";
-    ctx.fillText("Playing with: " + otherUsername, W / 2, H * 0.38);
+    ctx.fillText("Room Ready!", W / 2, H * 0.17);
+    ctx.restore();
+
+    // Player cards
+    const cardW = W * 0.82, cardH = s(68);
+    const cardX = (W - cardW) / 2;
+
+    // My player card
+    const myY = H * 0.24;
+    ctx.fillStyle = "rgba(255,200,0,0.12)";
+    roundRect(cardX, myY, cardW, cardH, s(12));
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,215,0,0.3)";
+    ctx.lineWidth   = s(1.5);
+    ctx.stroke();
+
+    const myPfp = currentUser ? currentUser.pfp : null;
+    const myName = currentUser ? currentUser.username : "Guest";
+    const avatarR = s(20);
+    drawAvatarCircle(cardX + s(18) + avatarR, myY + cardH / 2, avatarR, myPfp, myName);
+
+    ctx.save();
+    ctx.textAlign    = "left";
+    ctx.textBaseline = "middle";
+    ctx.font         = "bold " + s(15) + "px Arial, sans-serif";
+    ctx.fillStyle    = "#fff";
+    ctx.fillText(myName, cardX + s(56), myY + cardH / 2 - s(6));
+    ctx.font      = s(11) + "px Arial, sans-serif";
+    ctx.fillStyle = "#ffd700";
+    ctx.fillText(mpRole === "host" ? "Host  \u{1F451}" : "Player", cardX + s(56), myY + cardH / 2 + s(10));
+    ctx.restore();
+
+    // Opponent player card
+    const opY = myY + cardH + s(10);
+    ctx.fillStyle = "rgba(144,202,249,0.1)";
+    roundRect(cardX, opY, cardW, cardH, s(12));
+    ctx.fill();
+    ctx.strokeStyle = "rgba(144,202,249,0.2)";
+    ctx.lineWidth   = s(1.5);
+    ctx.stroke();
+
+    drawAvatarCircle(cardX + s(18) + avatarR, opY + cardH / 2, avatarR, otherPfp, "__peer__");
+
+    ctx.save();
+    ctx.textAlign    = "left";
+    ctx.textBaseline = "middle";
+    ctx.font         = "bold " + s(15) + "px Arial, sans-serif";
+    ctx.fillStyle    = "#90caf9";
+    ctx.fillText(otherUsername, cardX + s(56), opY + cardH / 2 - s(6));
+    ctx.font      = s(11) + "px Arial, sans-serif";
+    ctx.fillStyle = "rgba(255,255,255,0.45)";
+    ctx.fillText(mpRole === "host" ? "Player" : "Host  \u{1F451}", cardX + s(56), opY + cardH / 2 + s(10));
+    ctx.restore();
+
+    // VS divider
+    ctx.save();
+    ctx.textAlign    = "center";
+    ctx.textBaseline = "middle";
+    ctx.font         = "bold " + s(13) + "px Arial, sans-serif";
+    ctx.fillStyle    = "rgba(255,255,255,0.25)";
+    ctx.fillText("VS", W / 2, opY - s(5));
     ctx.restore();
 
     if (mpRole === "host") {
       const bW = W * 0.62, bH = s(52);
-      drawButton((W - bW) / 2, H * 0.50, bW, bH, "  START GAME");
+      drawButton((W - bW) / 2, H * 0.62, bW, bH, "  START GAME");
     } else {
       ctx.save();
       ctx.textAlign    = "center";
       ctx.textBaseline = "middle";
       ctx.font         = s(14) + "px Arial, sans-serif";
       ctx.fillStyle    = "rgba(255,255,255,0.42)";
-      ctx.fillText("Waiting for host to start...", W / 2, H * 0.52);
+      ctx.fillText("Waiting for host to start...", W / 2, H * 0.65);
       ctx.restore();
     }
   }
@@ -1326,14 +1429,16 @@ function draw() {
     const altSkin = getSkin(save.currentSkin === "blue" ? "classic" : "blue");
     drawBirdAt(otherBird.x, otherBird.y, otherBird.w, otherBird.h, otherBird.vy,
                altSkin, otherBirdDead ? 0.35 : 1);
-    drawBirdLabel(otherBird.x, otherBird.y, otherBird.w, otherUsername, "#90caf9");
+    drawBirdLabel(otherBird.x, otherBird.y, otherBird.w, otherUsername, "#90caf9",
+                  otherPfp, "__peer__");
   }
 
   drawBirdAt(bird.x, bird.y, bird.w, bird.h, bird.vy,
              getSkin(save.currentSkin), myBirdDead ? 0.35 : 1);
   if (mpActive) {
-    drawBirdLabel(bird.x, bird.y, bird.w,
-                  currentUser ? currentUser.username : "Guest", "#fff");
+    const myPfp = currentUser ? currentUser.pfp : null;
+    const myName = currentUser ? currentUser.username : "Guest";
+    drawBirdLabel(bird.x, bird.y, bird.w, myName, "#fff", myPfp, myName);
   }
 
   // Visual effects layers
@@ -1419,11 +1524,11 @@ function handlePointerDown(e) {
       if (hit(p.x, p.y, bX, H * 0.54 + bH + s(14), bW, bH)) { showCodeInput(); return; }
     } else if (mpSubState === "waiting") {
       const cbW = W * 0.5, cbH = s(44);
-      if (hit(p.x, p.y, (W - cbW) / 2, H * 0.62, cbW, cbH)) {
+      if (hit(p.x, p.y, (W - cbW) / 2, H * 0.78, cbW, cbH)) {
         cleanupMP(); mpSubState = "menu"; return;
       }
     } else if (mpSubState === "connected" && mpRole === "host") {
-      if (hit(p.x, p.y, bX, H * 0.50, bW, bH)) { startMPGame(); return; }
+      if (hit(p.x, p.y, bX, H * 0.62, bW, bH)) { startMPGame(); return; }
     }
     return;
   }
@@ -1549,6 +1654,30 @@ function generateCode() {
   return c;
 }
 
+function generateQrImage(code) {
+  mpQrImage = null;
+  if (typeof qrcode === "undefined") return;
+  try {
+    var qr = qrcode(0, "M");
+    qr.addData(code);
+    qr.make();
+    var img = new Image();
+    img.src = qr.createDataURL(4, 0);
+    img.onload = function() { mpQrImage = img; };
+  } catch (ex) { /* QR lib unavailable */ }
+}
+
+function getMyPfpPayload() {
+  if (!currentUser || !currentUser.pfp) return null;
+  if (currentUser.pfp.type === "premade") return { type: "premade", avatarId: currentUser.pfp.avatarId };
+  if (currentUser.pfp.type === "custom" && currentUser.pfp.dataUrl) {
+    var url = currentUser.pfp.dataUrl;
+    if (url.length > 50000) return null;  // skip huge images
+    return { type: "custom", dataUrl: url };
+  }
+  return null;
+}
+
 function peerIdFromCode(code) {
   return "flapgame-" + code.toUpperCase().replace(/-/g, "");
 }
@@ -1561,6 +1690,7 @@ function startHostMP() {
   mpCode     = generateCode();
   mpSubState = "creating";
   mpError    = "";
+  generateQrImage(mpCode);
 
   try { mpPeer = new window.Peer(peerIdFromCode(mpCode)); }
   catch (ex) { mpError = "Could not start peer"; mpSubState = "menu"; return; }
@@ -1572,6 +1702,7 @@ function startHostMP() {
       _mpHostRetries++;
       mpPeer.destroy(); mpPeer = null;
       mpCode = generateCode();
+      generateQrImage(mpCode);
       startHostMP();
     } else {
       _mpHostRetries = 0;
@@ -1610,7 +1741,11 @@ function joinGameMP(code) {
 function setupMPConn() {
   mpConn.on("open", function() {
     mpSubState = "connected";
-    mpConn.send({ type: "hello", username: currentUser ? currentUser.username : "Guest" });
+    mpConn.send({
+      type: "hello",
+      username: currentUser ? currentUser.username : "Guest",
+      pfp: getMyPfpPayload(),
+    });
   });
 
   mpConn.on("data", handleMPData);
@@ -1632,6 +1767,19 @@ function handleMPData(data) {
   if (data.type === "hello") {
     var uname = (typeof data.username === "string") ? data.username.slice(0, 20).trim() : "";
     otherUsername = uname || "Guest";
+    // Receive avatar info
+    if (data.pfp && typeof data.pfp === "object") {
+      if (data.pfp.type === "premade" && typeof data.pfp.avatarId === "string") {
+        otherPfp = { type: "premade", avatarId: data.pfp.avatarId };
+      } else if (data.pfp.type === "custom" && typeof data.pfp.dataUrl === "string" && data.pfp.dataUrl.length <= 50000) {
+        otherPfp = { type: "custom", dataUrl: data.pfp.dataUrl };
+        cachePfpImg("__peer__", otherPfp);
+      } else {
+        otherPfp = null;
+      }
+    } else {
+      otherPfp = null;
+    }
 
   } else if (data.type === "start" && mpRole === "guest") {
     mpActive   = true;
@@ -1695,7 +1843,9 @@ function cleanupMP() {
   otherBirdDead = false;
   myBirdDead    = false;
   otherUsername = "Guest";
+  otherPfp      = null;
   otherScore    = 0;
+  mpQrImage     = null;
 }
 
 // ---- Code-entry overlay (join room) ------------------------
