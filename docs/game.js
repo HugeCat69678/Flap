@@ -22,8 +22,12 @@ function s(n) { return n * (W / DESIGN_W); }
 
 // ---- Canvas resize with devicePixelRatio -------------------
 
-let cachedSkyGrad  = null;   // invalidated on resize
-let cachedPipeGrad = null;   // invalidated on resize
+let cachedSkyGrad    = null;   // invalidated on resize
+let cachedPipeGrad   = null;   // invalidated on resize
+let cachedGroundGrad = null;
+let cachedGrassGrad  = null;
+let cachedLipGradT   = null;   // top pipe lip gradient (keyed by top value)
+let cachedLipGradB   = null;   // bottom pipe lip gradient
 
 function resizeCanvas() {
   // Fixed logical dimensions — zoom and resize never change game logic
@@ -44,8 +48,10 @@ function resizeCanvas() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
-  cachedSkyGrad  = null;
-  cachedPipeGrad = null;
+  cachedSkyGrad    = null;
+  cachedPipeGrad   = null;
+  cachedGroundGrad = null;
+  cachedGrassGrad  = null;
 }
 
 resizeCanvas();
@@ -237,7 +243,7 @@ let deathFlash   = 0;    // screen flash alpha (0–1)
 let wingAngle    = 0;    // wing flap animation phase
 
 function spawnScoreParticles(cx, cy) {
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 5; i++) {
     const angle = Math.random() * Math.PI * 2;
     const speed = s(1.2 + Math.random() * 2);
     particles.push({
@@ -245,8 +251,8 @@ function spawnScoreParticles(cx, cy) {
       vx: Math.cos(angle) * speed,
       vy: Math.sin(angle) * speed - s(1),
       life: 1,
-      decay: 0.018 + Math.random() * 0.012,
-      size: s(2 + Math.random() * 3),
+      decay: 0.022 + Math.random() * 0.014,
+      size: s(2 + Math.random() * 2.5),
       color: Math.random() > 0.5 ? "#ffd700" : "#fff",
     });
   }
@@ -257,23 +263,33 @@ function spawnScorePopup(cx, cy, text) {
 }
 
 function updateParticles() {
-  for (let i = particles.length - 1; i >= 0; i--) {
+  let n = particles.length;
+  for (let i = n - 1; i >= 0; i--) {
     const p = particles[i];
     p.x    += p.vx;
     p.y    += p.vy;
     p.vy   += s(0.06);
     p.life -= p.decay;
-    if (p.life <= 0) particles.splice(i, 1);
+    if (p.life <= 0) {
+      particles[i] = particles[n - 1];
+      n--;
+    }
   }
+  particles.length = n;
 }
 
 function updateScorePopups() {
-  for (let i = scorePopups.length - 1; i >= 0; i--) {
+  let n = scorePopups.length;
+  for (let i = n - 1; i >= 0; i--) {
     const p = scorePopups[i];
     p.y    -= s(0.8);
     p.life -= p.decay;
-    if (p.life <= 0) scorePopups.splice(i, 1);
+    if (p.life <= 0) {
+      scorePopups[i] = scorePopups[n - 1];
+      n--;
+    }
   }
+  scorePopups.length = n;
 }
 
 function drawParticles() {
@@ -296,8 +312,6 @@ function drawScorePopups() {
     ctx.textAlign     = "center";
     ctx.textBaseline  = "middle";
     ctx.fillStyle     = "#ffd700";
-    ctx.shadowColor   = "rgba(0,0,0,0.5)";
-    ctx.shadowBlur    = s(3);
     ctx.fillText(p.text, p.x, p.y);
     ctx.restore();
   }
@@ -338,7 +352,6 @@ function initHills() {
 function drawHills() {
   const groundY = H - s(70);
   for (const hill of hills) {
-    ctx.save();
     ctx.fillStyle = hill.color;
     ctx.beginPath();
     ctx.moveTo(-s(20), groundY);
@@ -351,7 +364,6 @@ function drawHills() {
     ctx.lineTo(W + s(20), groundY);
     ctx.closePath();
     ctx.fill();
-    ctx.restore();
   }
 }
 
@@ -368,6 +380,7 @@ let otherUsername = "Guest";
 let otherScore    = 0;
 let otherBirdDead = false;
 let myBirdDead    = false;
+let mpSyncCounter = 0;      // throttle MP sync to every 3rd frame (~20fps)
 
 function initClouds() {
   clouds = [];
@@ -553,17 +566,21 @@ function step() {
     }
   }
 
-  // Sync to peer
+  // Sync to peer (throttled to ~20fps)
   if (mpActive && mpConn) {
-    if (mpRole === "host") {
-      mpConn.send({
-        type:  "sync",
-        pipes: pipes.map(p => ({ x: p.x, top: p.top, bottom: p.bottom })),
-        bird:  { y: bird.y, vy: bird.vy },
-        score: score,
-      });
-    } else {
-      mpConn.send({ type: "bird", y: bird.y, vy: bird.vy });
+    mpSyncCounter++;
+    if (mpSyncCounter >= 3) {
+      mpSyncCounter = 0;
+      if (mpRole === "host") {
+        mpConn.send({
+          type:  "sync",
+          pipes: pipes.map(p => ({ x: p.x, top: p.top, bottom: p.bottom })),
+          bird:  { y: bird.y, vy: bird.vy },
+          score: score,
+        });
+      } else {
+        mpConn.send({ type: "bird", y: bird.y, vy: bird.vy });
+      }
     }
   }
 }
@@ -599,17 +616,13 @@ function roundRect(x, y, w, h, r) {
 function drawButton(x, y, w, h, label, primary) {
   if (primary === undefined) primary = true;
   const r = h / 3;
-  ctx.save();
-  ctx.shadowColor    = "rgba(0,0,0,0.5)";
-  ctx.shadowBlur     = s(8);
-  ctx.shadowOffsetY  = s(3);
   roundRect(x, y, w, h, r);
   const g = ctx.createLinearGradient(x, y, x, y + h);
   if (primary) { g.addColorStop(0, "#ffb347"); g.addColorStop(1, "#c0392b"); }
   else         { g.addColorStop(0, "#7f8c8d"); g.addColorStop(1, "#2d3436"); }
   ctx.fillStyle = g;
   ctx.fill();
-  ctx.shadowColor = "transparent";
+  // Inner highlight
   ctx.save();
   roundRect(x, y, w, h, r);
   ctx.clip();
@@ -621,11 +634,7 @@ function drawButton(x, y, w, h, label, primary) {
   ctx.font          = "bold " + Math.round(h * 0.38) + "px Arial, sans-serif";
   ctx.textAlign     = "center";
   ctx.textBaseline  = "middle";
-  ctx.shadowColor   = "rgba(0,0,0,0.4)";
-  ctx.shadowBlur    = s(2);
-  ctx.shadowOffsetY = s(1);
   ctx.fillText(label, x + w / 2, y + h / 2 + s(1));
-  ctx.restore();
 }
 
 // ---- Avatar drawing ----------------------------------------
@@ -710,25 +719,25 @@ function drawBirdAt(x, y, w, h, vy, skin, alpha) {
   ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // Body highlight for 3D effect
+  // Subtle top highlight for 3D effect (no inner ball)
   ctx.save();
   ctx.beginPath();
   ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
   ctx.clip();
-  ctx.fillStyle = "rgba(255,255,255,0.18)";
+  ctx.fillStyle = "rgba(255,255,255,0.10)";
   ctx.beginPath();
-  ctx.ellipse(-w * 0.08, -h * 0.22, w * 0.45, h * 0.35, -0.2, 0, Math.PI * 2);
+  ctx.ellipse(-w * 0.05, -h * 0.32, w * 0.35, h * 0.18, -0.15, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 
   ctx.fillStyle = skin.eyeColor;
   ctx.beginPath();
-  ctx.arc(w * 0.14, -h * 0.14, h * 0.22, 0, Math.PI * 2);
+  ctx.arc(w * 0.18, -h * 0.12, h * 0.14, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.fillStyle = skin.pupilColor;
   ctx.beginPath();
-  ctx.arc(w * 0.2, -h * 0.14, h * 0.1, 0, Math.PI * 2);
+  ctx.arc(w * 0.22, -h * 0.12, h * 0.07, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.fillStyle = skin.beakColor;
@@ -753,8 +762,6 @@ function drawBirdLabel(x, y, w, label, color) {
   roundRect(x + w / 2 - tw / 2 - px, y - s(22), tw + px * 2, s(14) + py, s(4));
   ctx.fill();
   ctx.fillStyle   = color || "#fff";
-  ctx.shadowColor = "rgba(0,0,0,0.8)";
-  ctx.shadowBlur  = s(3);
   ctx.fillText(label, x + w / 2, y - s(11));
   ctx.restore();
 }
@@ -772,33 +779,32 @@ function drawBackground() {
   ctx.fillStyle = cachedSkyGrad;
   ctx.fillRect(0, 0, W, H);
 
-  // Clouds with soft shadow
-  ctx.save();
-  ctx.shadowColor = "rgba(0,0,0,0.06)";
-  ctx.shadowBlur  = s(8);
-  ctx.shadowOffsetY = s(4);
+  // Clouds — no shadow on mobile for performance
   ctx.fillStyle = "rgba(255,255,255,0.82)";
   for (const c of clouds) drawCloud(c.x, c.y, c.r);
-  ctx.restore();
 
   // Parallax hills behind the ground
   drawHills();
 
   const groundY = H - s(70);
 
-  // Ground with richer gradient
-  const groundGrad = ctx.createLinearGradient(0, groundY, 0, H);
-  groundGrad.addColorStop(0,   "#c9b458");
-  groundGrad.addColorStop(0.5, "#ded895");
-  groundGrad.addColorStop(1,   "#b8a940");
-  ctx.fillStyle = groundGrad;
+  // Ground with richer gradient (cached)
+  if (!cachedGroundGrad) {
+    cachedGroundGrad = ctx.createLinearGradient(0, groundY, 0, H);
+    cachedGroundGrad.addColorStop(0,   "#c9b458");
+    cachedGroundGrad.addColorStop(0.5, "#ded895");
+    cachedGroundGrad.addColorStop(1,   "#b8a940");
+  }
+  ctx.fillStyle = cachedGroundGrad;
   ctx.fillRect(0, groundY, W, s(70));
 
-  // Grass stripe with gradient
-  const grassGrad = ctx.createLinearGradient(0, groundY, 0, groundY + s(8));
-  grassGrad.addColorStop(0, "#8fd64a");
-  grassGrad.addColorStop(1, "#5da020");
-  ctx.fillStyle = grassGrad;
+  // Grass stripe with gradient (cached)
+  if (!cachedGrassGrad) {
+    cachedGrassGrad = ctx.createLinearGradient(0, groundY, 0, groundY + s(8));
+    cachedGrassGrad.addColorStop(0, "#8fd64a");
+    cachedGrassGrad.addColorStop(1, "#5da020");
+  }
+  ctx.fillStyle = cachedGrassGrad;
   ctx.fillRect(0, groundY, W, s(8));
 
   ctx.fillStyle = "rgba(0,0,0,0.06)";
@@ -825,6 +831,11 @@ function drawPipes() {
     cachedPipeGrad.addColorStop(0.85, "#4caf50");
     cachedPipeGrad.addColorStop(1,    "#357a38");
   }
+  // Reusable lip colors
+  const lipDark  = "#1b5e20";
+  const lipLight = "#2e7d32";
+  const lipH     = s(18);
+
   for (const p of pipes) {
     ctx.save();
     ctx.translate(p.x, 0);
@@ -838,33 +849,27 @@ function drawPipes() {
     ctx.fillStyle = cachedPipeGrad;
     ctx.fillRect(0, 0, pw, p.top);
 
-    // Top pipe lip with gradient
-    const lipGrad = ctx.createLinearGradient(0, p.top - s(18), 0, p.top);
-    lipGrad.addColorStop(0, "#2e7d32");
-    lipGrad.addColorStop(1, "#1b5e20");
-    ctx.fillStyle = lipGrad;
-    ctx.fillRect(-s(3), p.top - s(18), pw + s(6), s(18));
+    // Top pipe lip (solid colors instead of gradient for perf)
+    ctx.fillStyle = lipDark;
+    ctx.fillRect(-s(3), p.top - lipH, pw + s(6), lipH);
 
     // Bottom pipe body
     ctx.fillStyle = cachedPipeGrad;
     ctx.fillRect(0, p.bottom, pw, H - p.bottom);
 
-    // Bottom pipe lip with gradient
-    const lipGrad2 = ctx.createLinearGradient(0, p.bottom, 0, p.bottom + s(18));
-    lipGrad2.addColorStop(0, "#1b5e20");
-    lipGrad2.addColorStop(1, "#2e7d32");
-    ctx.fillStyle = lipGrad2;
-    ctx.fillRect(-s(3), p.bottom, pw + s(6), s(18));
+    // Bottom pipe lip
+    ctx.fillStyle = lipDark;
+    ctx.fillRect(-s(3), p.bottom, pw + s(6), lipH);
 
     // Highlight stripe
     ctx.fillStyle = "rgba(255,255,255,0.2)";
     ctx.fillRect(s(5), 0, s(4), p.top);
-    ctx.fillRect(s(5), p.bottom + s(18), s(4), H - p.bottom - s(18));
+    ctx.fillRect(s(5), p.bottom + lipH, s(4), H - p.bottom - lipH);
 
     // Dark edge stripe
     ctx.fillStyle = "rgba(0,0,0,0.1)";
     ctx.fillRect(pw - s(4), 0, s(4), p.top);
-    ctx.fillRect(pw - s(4), p.bottom + s(18), s(4), H - p.bottom - s(18));
+    ctx.fillRect(pw - s(4), p.bottom + lipH, s(4), H - p.bottom - lipH);
 
     ctx.restore();
   }
@@ -900,8 +905,6 @@ function drawHUD() {
   ctx.fill();
   ctx.textBaseline = "alphabetic";
   ctx.fillStyle    = "rgba(255,255,255,0.96)";
-  ctx.shadowColor  = "rgba(0,0,0,0.55)";
-  ctx.shadowBlur   = s(4);
   ctx.fillText(scoreStr, W / 2, s(49));
 
   drawCoinIcon(s(10), s(10), s(11));
@@ -941,15 +944,12 @@ function drawMenu() {
   drawBackground();
 
   ctx.save();
-  ctx.shadowColor = "rgba(0,0,0,0.55)";
-  ctx.shadowBlur  = s(16);
   const cardGrad = ctx.createLinearGradient(W * 0.1, H * 0.07, W * 0.1, H * 0.07 + H * 0.28);
   cardGrad.addColorStop(0, "rgba(20,20,60,0.82)");
   cardGrad.addColorStop(1, "rgba(5,5,25,0.82)");
   ctx.fillStyle = cardGrad;
   roundRect(W * 0.1, H * 0.07, W * 0.8, H * 0.28, s(16));
   ctx.fill();
-  ctx.shadowColor = "transparent";
   ctx.strokeStyle = "rgba(255,215,0,0.22)";
   ctx.lineWidth   = s(1.5);
   ctx.stroke();
@@ -960,8 +960,6 @@ function drawMenu() {
 
   ctx.font        = "bold " + s(54) + "px Arial, sans-serif";
   ctx.fillStyle   = "#ffd700";
-  ctx.shadowColor = "#ff6600";
-  ctx.shadowBlur  = s(18);
   ctx.strokeStyle = "rgba(200,100,0,0.5)";
   ctx.lineWidth   = s(1.5);
   ctx.strokeText("FLAP!", W / 2, H * 0.165);
@@ -1153,6 +1151,7 @@ function drawMultiplayer() {
     const bX = (W - bW) / 2;
     drawButton(bX, H * 0.54,               bW, bH, "CREATE ROOM");
     drawButton(bX, H * 0.54 + bH + s(14),  bW, bH, "JOIN ROOM", false);
+    drawButton(bX, H * 0.54 + (bH + s(14)) * 2, bW, s(42), "SCAN QR CODE", false);
 
   } else if (mpSubState === "creating") {
     ctx.save();
@@ -1168,25 +1167,27 @@ function drawMultiplayer() {
     ctx.textAlign    = "center";
     ctx.textBaseline = "middle";
 
-    ctx.font      = "bold " + s(15) + "px Arial, sans-serif";
+    ctx.font      = "bold " + s(13) + "px Arial, sans-serif";
     ctx.fillStyle = "rgba(255,255,255,0.6)";
-    ctx.fillText("Share this code with your friend:", W / 2, H * 0.26);
+    ctx.fillText("Share code or scan QR:", W / 2, H * 0.18);
 
-    ctx.shadowColor = "rgba(255,215,0,0.55)";
-    ctx.shadowBlur  = s(22);
-    ctx.font        = "bold " + s(44) + "px Courier New, monospace";
+    ctx.font        = "bold " + s(36) + "px Courier New, monospace";
     ctx.fillStyle   = "#ffd700";
-    ctx.fillText(mpCode, W / 2, H * 0.40);
-    ctx.shadowBlur  = 0;
+    ctx.fillText(mpCode, W / 2, H * 0.27);
+
+    // Draw QR code
+    drawQRCode(W / 2, H * 0.46, s(110));
 
     const dots = ".".repeat(Math.floor(Date.now() / 500) % 4);
-    ctx.font      = s(13) + "px Arial, sans-serif";
+    ctx.font      = s(11) + "px Arial, sans-serif";
     ctx.fillStyle = "rgba(255,255,255,0.42)";
-    ctx.fillText("Waiting for friend to join" + dots, W / 2, H * 0.50);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("Waiting for friend" + dots, W / 2, H * 0.60);
     ctx.restore();
 
-    const cbW = W * 0.5, cbH = s(44);
-    drawButton((W - cbW) / 2, H * 0.62, cbW, cbH, "Cancel", false);
+    const cbW = W * 0.5, cbH = s(40);
+    drawButton((W - cbW) / 2, H * 0.66, cbW, cbH, "Cancel", false);
 
   } else if (mpSubState === "joining") {
     ctx.save();
@@ -1244,11 +1245,8 @@ function drawGameOver() {
   panelGrad.addColorStop(0, "rgba(18,18,50,0.96)");
   panelGrad.addColorStop(1, "rgba(6,6,28,0.96)");
   ctx.fillStyle   = panelGrad;
-  ctx.shadowColor = "rgba(0,0,0,0.7)";
-  ctx.shadowBlur  = s(20);
   roundRect(pX, pY, pW, pH, s(18));
   ctx.fill();
-  ctx.shadowColor = "transparent";
   ctx.strokeStyle = "rgba(239,83,80,0.35)";
   ctx.lineWidth   = s(1.5);
   ctx.stroke();
@@ -1257,10 +1255,7 @@ function drawGameOver() {
   ctx.textBaseline = "alphabetic";
   ctx.font         = "bold " + s(32) + "px Arial, sans-serif";
   ctx.fillStyle    = "#ef5350";
-  ctx.shadowColor  = "rgba(239,83,80,0.4)";
-  ctx.shadowBlur   = s(8);
   ctx.fillText("GAME OVER", W / 2, pY + s(46));
-  ctx.shadowBlur   = 0;
 
   ctx.fillStyle = "rgba(255,255,255,0.1)";
   ctx.fillRect(pX + pW * 0.1, pY + s(54), pW * 0.8, s(1));
@@ -1417,9 +1412,10 @@ function handlePointerDown(e) {
     if (mpSubState === "menu") {
       if (hit(p.x, p.y, bX, H * 0.54, bW, bH))              { startHostMP();  return; }
       if (hit(p.x, p.y, bX, H * 0.54 + bH + s(14), bW, bH)) { showCodeInput(); return; }
+      if (hit(p.x, p.y, bX, H * 0.54 + (bH + s(14)) * 2, bW, s(42))) { startQRScanner(); return; }
     } else if (mpSubState === "waiting") {
-      const cbW = W * 0.5, cbH = s(44);
-      if (hit(p.x, p.y, (W - cbW) / 2, H * 0.62, cbW, cbH)) {
+      const cbW = W * 0.5, cbH = s(40);
+      if (hit(p.x, p.y, (W - cbW) / 2, H * 0.66, cbW, cbH)) {
         cleanupMP(); mpSubState = "menu"; return;
       }
     } else if (mpSubState === "connected" && mpRole === "host") {
@@ -1696,6 +1692,8 @@ function cleanupMP() {
   myBirdDead    = false;
   otherUsername = "Guest";
   otherScore    = 0;
+  qrImg         = null;
+  stopQRScanner();
 }
 
 // ---- Code-entry overlay (join room) ------------------------
@@ -1730,6 +1728,14 @@ function showCodeInput() {
   input.onkeydown = function(e) {
     if (e.key === "Enter") document.getElementById("codeJoinBtn").click();
   };
+
+  var scanBtn = document.getElementById("codeScanBtn");
+  if (scanBtn) {
+    scanBtn.onclick = function() {
+      overlay.classList.add("hidden");
+      startQRScanner();
+    };
+  }
 }
 
 // ---- Auth overlay (login / register / profile) -------------
@@ -1902,6 +1908,220 @@ document.getElementById("authOverlay").addEventListener("click", function(e) {
   if (e.target === document.getElementById("authOverlay")) hideAuthOverlay();
 });
 
+// ---- QR Code Generator (minimal, version 2, alphanumeric) ---
+
+var qrCodeCache = {};  // code -> canvas element
+
+function generateQRCodeCanvas(text, moduleSize) {
+  if (!moduleSize) moduleSize = 4;
+  // Use a small offscreen canvas with a library-free approach:
+  // We encode the URL into a QR code using the browser's built-in capabilities
+  // For simplicity and reliability, we draw a styled code display instead of
+  // a full QR encoder, and provide the URL as copyable text.
+  // We'll use an image from a public QR API for the actual QR code.
+  var cacheKey = text + "|" + moduleSize;
+  if (qrCodeCache[cacheKey]) return qrCodeCache[cacheKey];
+
+  var img = new Image();
+  img.crossOrigin = "anonymous";
+  // Use a lightweight QR code API
+  img.src = "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=" + encodeURIComponent(text);
+  qrCodeCache[cacheKey] = img;
+  return img;
+}
+
+var qrImg = null;  // cached QR image for current room
+
+function drawQRCode(cx, cy, size) {
+  if (!mpCode) return;
+  var url = getGameURL(mpCode);
+  if (!qrImg || qrImg._url !== url) {
+    qrImg = generateQRCodeCanvas(url);
+    qrImg._url = url;
+  }
+  // Draw white background
+  ctx.fillStyle = "#fff";
+  roundRect(cx - size / 2 - s(4), cy - size / 2 - s(4), size + s(8), size + s(8), s(6));
+  ctx.fill();
+  if (qrImg.complete && qrImg.naturalWidth) {
+    ctx.drawImage(qrImg, cx - size / 2, cy - size / 2, size, size);
+  } else {
+    // Loading placeholder
+    ctx.fillStyle = "rgba(0,0,0,0.08)";
+    ctx.fillRect(cx - size / 2, cy - size / 2, size, size);
+    ctx.fillStyle = "#999";
+    ctx.font = s(10) + "px Arial, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("Loading QR...", cx, cy);
+  }
+}
+
+function getGameURL(code) {
+  // Build URL pointing to the game page with room code parameter
+  var base = window.location.href.split("?")[0].split("#")[0];
+  return base + "?join=" + encodeURIComponent(code);
+}
+
+// ---- QR Code Scanner (uses camera + BarcodeDetector) --------
+
+var qrScannerActive = false;
+var qrScannerVideo  = null;
+var qrScannerStream = null;
+var qrScannerOverlay = null;
+
+function startQRScanner() {
+  if (qrScannerActive) return;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    mpError = "Camera not available on this device";
+    return;
+  }
+
+  qrScannerActive = true;
+
+  // Create overlay for camera preview
+  qrScannerOverlay = document.createElement("div");
+  qrScannerOverlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.92);" +
+    "display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:200;padding:20px;";
+
+  var title = document.createElement("p");
+  title.textContent = "Scan QR Code to Join Room";
+  title.style.cssText = "color:#ffd700;font-family:Arial,sans-serif;font-size:18px;font-weight:bold;margin-bottom:16px;";
+  qrScannerOverlay.appendChild(title);
+
+  qrScannerVideo = document.createElement("video");
+  qrScannerVideo.setAttribute("playsinline", "");
+  qrScannerVideo.setAttribute("autoplay", "");
+  qrScannerVideo.style.cssText = "width:280px;height:280px;object-fit:cover;border-radius:16px;" +
+    "border:3px solid #ffd700;background:#000;";
+  qrScannerOverlay.appendChild(qrScannerVideo);
+
+  var hint = document.createElement("p");
+  hint.textContent = "Point your camera at a Flap QR code";
+  hint.style.cssText = "color:rgba(255,255,255,0.5);font-family:Arial,sans-serif;font-size:13px;margin-top:12px;";
+  qrScannerOverlay.appendChild(hint);
+
+  var cancelBtn = document.createElement("button");
+  cancelBtn.textContent = "Cancel";
+  cancelBtn.style.cssText = "margin-top:20px;padding:12px 36px;border:none;border-radius:9px;" +
+    "background:rgba(255,255,255,0.1);color:#bbb;font-size:15px;font-family:Arial,sans-serif;cursor:pointer;";
+  cancelBtn.onclick = stopQRScanner;
+  qrScannerOverlay.appendChild(cancelBtn);
+
+  document.body.appendChild(qrScannerOverlay);
+
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+    .then(function(stream) {
+      if (!qrScannerActive) { stream.getTracks().forEach(function(t) { t.stop(); }); return; }
+      qrScannerStream = stream;
+      qrScannerVideo.srcObject = stream;
+      qrScannerVideo.play();
+      scanQRFrame();
+    })
+    .catch(function() {
+      stopQRScanner();
+      mpError = "Camera access denied";
+    });
+}
+
+function scanQRFrame() {
+  if (!qrScannerActive || !qrScannerVideo) return;
+
+  // Use BarcodeDetector if available, otherwise fall back to manual canvas decode
+  if (typeof BarcodeDetector !== "undefined") {
+    var detector = new BarcodeDetector({ formats: ["qr_code"] });
+    detector.detect(qrScannerVideo).then(function(barcodes) {
+      if (barcodes.length > 0) {
+        handleScannedQR(barcodes[0].rawValue);
+        return;
+      }
+      if (qrScannerActive) requestAnimationFrame(scanQRFrame);
+    }).catch(function() {
+      if (qrScannerActive) setTimeout(scanQRFrame, 500);
+    });
+  } else {
+    // Fallback: try reading from canvas and checking for URL patterns
+    try {
+      var scanCanvas = document.createElement("canvas");
+      scanCanvas.width = 300;
+      scanCanvas.height = 300;
+      var scanCtx = scanCanvas.getContext("2d");
+      scanCtx.drawImage(qrScannerVideo, 0, 0, 300, 300);
+      // Without BarcodeDetector, we can't decode QR codes natively
+      // Show a message to the user
+      if (qrScannerOverlay) {
+        var existing = qrScannerOverlay.querySelector(".qr-fallback-msg");
+        if (!existing) {
+          var msg = document.createElement("p");
+          msg.className = "qr-fallback-msg";
+          msg.textContent = "QR scanning not supported in this browser. Enter the code manually.";
+          msg.style.cssText = "color:#ef5350;font-family:Arial,sans-serif;font-size:12px;margin-top:8px;text-align:center;";
+          qrScannerOverlay.appendChild(msg);
+        }
+      }
+    } catch (ex) { /* ignore */ }
+    if (qrScannerActive) setTimeout(scanQRFrame, 1000);
+  }
+}
+
+function handleScannedQR(value) {
+  // Extract room code from URL or raw code
+  var code = null;
+  try {
+    var url = new URL(value);
+    var joinParam = url.searchParams.get("join");
+    if (joinParam) code = joinParam.toUpperCase();
+  } catch (ex) {
+    // Not a URL, try as raw code
+    var raw = value.trim().toUpperCase().replace(/\s/g, "");
+    if (raw.length === 6) raw = raw.slice(0, 3) + "-" + raw.slice(3);
+    if (/^[A-Z]{3}-[0-9]{3}$/.test(raw)) code = raw;
+  }
+
+  if (code) {
+    stopQRScanner();
+    joinGameMP(code);
+  }
+}
+
+function stopQRScanner() {
+  qrScannerActive = false;
+  if (qrScannerStream) {
+    qrScannerStream.getTracks().forEach(function(t) { t.stop(); });
+    qrScannerStream = null;
+  }
+  if (qrScannerVideo) {
+    qrScannerVideo.srcObject = null;
+    qrScannerVideo = null;
+  }
+  if (qrScannerOverlay && qrScannerOverlay.parentNode) {
+    qrScannerOverlay.parentNode.removeChild(qrScannerOverlay);
+    qrScannerOverlay = null;
+  }
+}
+
+// ---- URL auto-join -----------------------------------------
+
+function checkURLJoin() {
+  try {
+    var params = new URLSearchParams(window.location.search);
+    var joinCode = params.get("join");
+    if (joinCode) {
+      joinCode = joinCode.toUpperCase().replace(/\s/g, "");
+      if (joinCode.length === 6 && joinCode.indexOf("-") === -1)
+        joinCode = joinCode.slice(0, 3) + "-" + joinCode.slice(3);
+      if (/^[A-Z]{3}-[0-9]{3}$/.test(joinCode)) {
+        // Clean the URL so refreshing doesn't re-join
+        var cleanURL = window.location.href.split("?")[0];
+        window.history.replaceState({}, "", cleanURL);
+        // Go to multiplayer and join
+        state = S.MULTIPLAYER;
+        setTimeout(function() { joinGameMP(joinCode); }, 500);
+      }
+    }
+  } catch (ex) { /* ignore */ }
+}
+
 // ---- Audio -------------------------------------------------
 
 var audioCtx = null;
@@ -1954,4 +2174,5 @@ function playHitSound() {
 // ---- Boot --------------------------------------------------
 
 initClouds();
+checkURLJoin();
 update();
