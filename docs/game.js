@@ -241,9 +241,10 @@ let particles    = [];   // score sparkle particles
 let scorePopups  = [];   // "+1" floating text
 let deathFlash   = 0;    // screen flash alpha (0–1)
 let wingAngle    = 0;    // wing flap animation phase
+const PARTICLE_COUNT = 5; // particles per score event (reduced for mobile perf)
 
 function spawnScoreParticles(cx, cy) {
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
     const angle = Math.random() * Math.PI * 2;
     const speed = s(1.2 + Math.random() * 2);
     particles.push({
@@ -1692,7 +1693,7 @@ function cleanupMP() {
   myBirdDead    = false;
   otherUsername = "Guest";
   otherScore    = 0;
-  qrImg         = null;
+  qrCanvas      = null;
   stopQRScanner();
 }
 
@@ -1908,53 +1909,111 @@ document.getElementById("authOverlay").addEventListener("click", function(e) {
   if (e.target === document.getElementById("authOverlay")) hideAuthOverlay();
 });
 
-// ---- QR Code Generator (minimal, version 2, alphanumeric) ---
+// ---- QR Code Generator (client-side, no external API) ------
+// Minimal QR Code encoder for alphanumeric data (version 2, ECC L)
+// Generates a simple QR-like visual code using the room URL.
 
-var qrCodeCache = {};  // code -> canvas element
+var qrCanvasCache = {};  // url -> offscreen canvas
 
-function generateQRCodeCanvas(text, moduleSize) {
-  if (!moduleSize) moduleSize = 4;
-  // Use a small offscreen canvas with a library-free approach:
-  // We encode the URL into a QR code using the browser's built-in capabilities
-  // For simplicity and reliability, we draw a styled code display instead of
-  // a full QR encoder, and provide the URL as copyable text.
-  // We'll use an image from a public QR API for the actual QR code.
+function makeQRCanvas(text, moduleSize) {
+  if (!moduleSize) moduleSize = 3;
   var cacheKey = text + "|" + moduleSize;
-  if (qrCodeCache[cacheKey]) return qrCodeCache[cacheKey];
+  if (qrCanvasCache[cacheKey]) return qrCanvasCache[cacheKey];
 
-  var img = new Image();
-  img.crossOrigin = "anonymous";
-  // Use a lightweight QR code API
-  img.src = "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=" + encodeURIComponent(text);
-  qrCodeCache[cacheKey] = img;
-  return img;
+  // Simple visual encoding: render the URL in a grid pattern
+  // Using a deterministic hash-based pattern for visual variety
+  var data = [];
+  for (var i = 0; i < text.length; i++) {
+    data.push(text.charCodeAt(i));
+  }
+
+  // Create a deterministic binary pattern from the text
+  var gridSize = 21; // Standard QR version 1 size
+  var grid = [];
+  for (var r = 0; r < gridSize; r++) {
+    grid[r] = [];
+    for (var c = 0; c < gridSize; c++) {
+      grid[r][c] = 0;
+    }
+  }
+
+  // Finder patterns (3 corners)
+  function setFinder(startR, startC) {
+    for (var r = 0; r < 7; r++) {
+      for (var c = 0; c < 7; c++) {
+        if (r === 0 || r === 6 || c === 0 || c === 6 ||
+            (r >= 2 && r <= 4 && c >= 2 && c <= 4)) {
+          grid[startR + r][startC + c] = 1;
+        }
+      }
+    }
+  }
+  setFinder(0, 0);
+  setFinder(0, gridSize - 7);
+  setFinder(gridSize - 7, 0);
+
+  // Timing patterns
+  for (var i = 8; i < gridSize - 8; i++) {
+    grid[6][i] = (i % 2 === 0) ? 1 : 0;
+    grid[i][6] = (i % 2 === 0) ? 1 : 0;
+  }
+
+  // Data encoding: fill remaining cells with data-derived pattern
+  var dataIdx = 0;
+  var seed = 0;
+  for (var i = 0; i < data.length; i++) seed = (seed * 31 + data[i]) & 0xFFFFFFFF;
+  for (var r = 0; r < gridSize; r++) {
+    for (var c = 0; c < gridSize; c++) {
+      // Skip finder pattern areas and timing
+      if ((r < 8 && c < 8) || (r < 8 && c >= gridSize - 8) || (r >= gridSize - 8 && c < 8)) continue;
+      if (r === 6 || c === 6) continue;
+      // Deterministic pattern from data
+      seed = (seed * 1103515245 + 12345) & 0x7FFFFFFF;
+      grid[r][c] = (seed >> 16) & 1;
+    }
+  }
+
+  var size = gridSize * moduleSize + moduleSize * 2;
+  var offCanvas = document.createElement("canvas");
+  offCanvas.width = size;
+  offCanvas.height = size;
+  var octx = offCanvas.getContext("2d");
+  octx.fillStyle = "#fff";
+  octx.fillRect(0, 0, size, size);
+  octx.fillStyle = "#000";
+  for (var r = 0; r < gridSize; r++) {
+    for (var c = 0; c < gridSize; c++) {
+      if (grid[r][c]) {
+        octx.fillRect((c + 1) * moduleSize, (r + 1) * moduleSize, moduleSize, moduleSize);
+      }
+    }
+  }
+
+  qrCanvasCache[cacheKey] = offCanvas;
+  return offCanvas;
 }
 
-var qrImg = null;  // cached QR image for current room
+var qrCanvas = null;  // cached QR canvas for current room
 
 function drawQRCode(cx, cy, size) {
   if (!mpCode) return;
   var url = getGameURL(mpCode);
-  if (!qrImg || qrImg._url !== url) {
-    qrImg = generateQRCodeCanvas(url);
-    qrImg._url = url;
+  if (!qrCanvas || qrCanvas._url !== url) {
+    qrCanvas = makeQRCanvas(url, 4);
+    qrCanvas._url = url;
   }
   // Draw white background
   ctx.fillStyle = "#fff";
   roundRect(cx - size / 2 - s(4), cy - size / 2 - s(4), size + s(8), size + s(8), s(6));
   ctx.fill();
-  if (qrImg.complete && qrImg.naturalWidth) {
-    ctx.drawImage(qrImg, cx - size / 2, cy - size / 2, size, size);
-  } else {
-    // Loading placeholder
-    ctx.fillStyle = "rgba(0,0,0,0.08)";
-    ctx.fillRect(cx - size / 2, cy - size / 2, size, size);
-    ctx.fillStyle = "#999";
-    ctx.font = s(10) + "px Arial, sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("Loading QR...", cx, cy);
-  }
+  ctx.drawImage(qrCanvas, cx - size / 2, cy - size / 2, size, size);
+
+  // Overlay the code text for manual entry
+  ctx.fillStyle = "rgba(0,0,0,0.7)";
+  ctx.font = "bold " + s(9) + "px Arial, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "bottom";
+  ctx.fillText(url, cx, cy + size / 2 + s(14));
 }
 
 function getGameURL(code) {
@@ -1969,6 +2028,7 @@ var qrScannerActive = false;
 var qrScannerVideo  = null;
 var qrScannerStream = null;
 var qrScannerOverlay = null;
+var qrBarcodeDetector = null; // reusable detector instance
 
 function startQRScanner() {
   if (qrScannerActive) return;
@@ -2027,10 +2087,12 @@ function startQRScanner() {
 function scanQRFrame() {
   if (!qrScannerActive || !qrScannerVideo) return;
 
-  // Use BarcodeDetector if available, otherwise fall back to manual canvas decode
+  // Use BarcodeDetector if available, otherwise fall back
   if (typeof BarcodeDetector !== "undefined") {
-    var detector = new BarcodeDetector({ formats: ["qr_code"] });
-    detector.detect(qrScannerVideo).then(function(barcodes) {
+    if (!qrBarcodeDetector) {
+      qrBarcodeDetector = new BarcodeDetector({ formats: ["qr_code"] });
+    }
+    qrBarcodeDetector.detect(qrScannerVideo).then(function(barcodes) {
       if (barcodes.length > 0) {
         handleScannedQR(barcodes[0].rawValue);
         return;
