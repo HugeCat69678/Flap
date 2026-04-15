@@ -714,7 +714,7 @@ function drawBirdAt(x, y, w, h, vy, skin, alpha) {
   const wingFlap = Math.sin(wingAngle) * h * 0.18;
   ctx.fillStyle = skin.wingColor;
   ctx.beginPath();
-  ctx.ellipse(-w * 0.08, h * 0.15 + wingFlap, w * 0.3, h * 0.25, 0.3, 0, Math.PI * 2);
+  ctx.ellipse(-w * 0.08, h * 0.05 + wingFlap, w * 0.3, h * 0.25, 0.3, 0, Math.PI * 2);
   ctx.fill();
 
   // Round body (ellipse)
