@@ -398,7 +398,7 @@ function step() {
         type:  "sync",
         pipes: pipes.map(p => ({ x: p.x, top: p.top, bottom: p.bottom })),
         bird:  { y: bird.y, vy: bird.vy },
-        score: otherScore,
+        score: score,
       });
     } else {
       mpConn.send({ type: "bird", y: bird.y, vy: bird.vy });
