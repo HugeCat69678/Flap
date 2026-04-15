@@ -22,6 +22,9 @@ function s(n) { return n * (W / DESIGN_W); }
 
 // ---- Canvas resize with devicePixelRatio -------------------
 
+let cachedSkyGrad  = null;   // invalidated on resize
+let cachedPipeGrad = null;   // invalidated on resize
+
 function resizeCanvas() {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
@@ -218,8 +221,6 @@ let score       = 0;
 let coinsEarned = 0;
 let groundX     = 0;
 let clouds      = [];
-let cachedSkyGrad  = null;   // invalidated on resize
-let cachedPipeGrad = null;   // invalidated on resize
 
 // Multiplayer
 let mpActive      = false;
